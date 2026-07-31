@@ -1,0 +1,5 @@
+# Plugins are checked out on Windows, macOS and Linux — keep LF in the repo so
+# the collector scripts' shebangs stay valid everywhere.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

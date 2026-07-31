@@ -1,35 +1,81 @@
-# smajl-marketplace
-
-Personal Claude Code plugin marketplace for Jan Pesa. Hosts one plugin per
-skill/agent/command, so each can be installed and updated independently.
-
-## Layout
+<div align="center">
 
 ```
-.claude-plugin/marketplace.json   # marketplace manifest — lists every plugin below
+                         _  _
+     ___ _ __ ___   __ _(_) |
+    / __| '_ ` _ \ / _` | | |
+    \__ \ | | | | | (_| | | |      ( ^_^ )
+    |___/_| |_| |_|\__,_| |_|
+         m a r k e t p l a c e
+```
+
+**Jan Pesa's personal Claude Code plugin marketplace**
+
+One plugin per skill, agent or command — each installed and updated on its own.
+
+</div>
+
+---
+
+## 📦 Plugins
+
+### `harvest-day` — fill your timesheet from what you actually did
+
+Reconstructs a workday from every trace it left, proposes Harvest time entries,
+and logs them **only after you confirm**.
+
+```
+    git ─┐
+ gitlab ─┤
+   jira ─┤     cluster        route to        estimate
+ conflu ─┼──▶  by ticket ──▶  project ──▶  hours, twice ──┐
+    cal ─┤     & meeting      + task        (evidence·fill)
+granola ─┤                                                │
+  slack ─┘                                                ▼
+                                                   ┌─────────────┐
+              harvest ⏱ ◀── log ──  you review ✅  │  the table  │
+                                                   └─────────────┘
+```
+
+| | |
+|---|---|
+| 🚀 Run | `/harvest` · `/harvest yesterday` · `/harvest 2026-07-27..2026-07-31` |
+| ⚙️ Config | `~/.claude/harvest-day/config.json` — written by the first-run wizard |
+| 🔌 Needs | Harvest MCP · `glab` · Google Calendar, Atlassian, Granola & Slack connectors |
+| 🩺 Check | `node .../scripts/doctor.mjs` reports what's wired and what isn't |
+
+Bare `/harvest` finds the days in the last two weeks that are empty or under
+target and offers to fill them. Every source is optional — a missing one
+degrades to a warning, never a blocked run. Nothing reaches Harvest unreviewed.
+
+---
+
+## 🗂 Layout
+
+```
+.claude-plugin/marketplace.json     # marketplace manifest — lists every plugin
 plugins/
   <plugin-name>/
-    .claude-plugin/plugin.json    # plugin manifest
-    skills/<plugin-name>/SKILL.md # (or commands/, agents/ — whatever the plugin needs)
+    .claude-plugin/plugin.json      # plugin manifest
+    skills/<plugin-name>/SKILL.md   # (or commands/, agents/ — whatever it needs)
 ```
 
-## Adding a new plugin
+## ➕ Adding a new plugin
 
 1. Create `plugins/<name>/.claude-plugin/plugin.json`.
-2. Add the skill/command/agent content under `plugins/<name>/` (e.g. `skills/<name>/SKILL.md`).
-3. Add an entry for it to the `plugins` array in `.claude-plugin/marketplace.json`,
+2. Add the content under `plugins/<name>/` (e.g. `skills/<name>/SKILL.md`).
+3. Add an entry to the `plugins` array in `.claude-plugin/marketplace.json`
    with `"source": "./plugins/<name>"`.
-4. Commit and push. Machines with this marketplace added just need
-   `/plugin marketplace update smajl-marketplace` to see it.
+4. Commit and push — other machines just need a marketplace update to see it.
 
-## Installing on a machine
+## 💻 Installing on a machine
 
 ```
 /plugin marketplace add <this-repo-url>
-/plugin install example-skill@smajl-marketplace
+/plugin install harvest-day@smajl-marketplace
 ```
 
-To pick up updates later:
+Pick up updates later:
 
 ```
 /plugin marketplace update smajl-marketplace

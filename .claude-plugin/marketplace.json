@@ -3,14 +3,14 @@
   "name": "smajl-marketplace",
   "description": "Jan Pesa's personal Claude Code plugin marketplace — skills, agents, and commands shared across machines.",
   "owner": {
-    "name": "Jan Pesa",
-    "email": "jan.pesa@graphaware.com"
+    "name": "Jan Peša",
+    "email": "jan.pesa@gmail.com"
   },
   "plugins": [
     {
-      "name": "example-skill",
-      "description": "Placeholder plugin — replace with a real skill, then add one entry here per plugin.",
-      "source": "./plugins/example-skill",
+      "name": "harvest-day",
+      "description": "Reconstruct a workday from git, GitLab, Jira, Google Calendar, Granola and Slack, then log it to Harvest after you confirm.",
+      "source": "./plugins/harvest-day",
       "category": "productivity"
     }
   ]

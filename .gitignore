@@ -1,0 +1,16 @@
+# Editors / IDEs
+.idea/
+.vscode/
+*.swp
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node — only present if a plugin ever grows dependencies
+node_modules/
+
+# Local scratch, never part of a plugin
+*.local.json
+scratch/
