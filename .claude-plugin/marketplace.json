@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "jan-marketplace",
+  "description": "Jan Pesa's personal Claude Code plugin marketplace — skills, agents, and commands shared across machines.",
+  "owner": {
+    "name": "Jan Pesa",
+    "email": "jan.pesa@graphaware.com"
+  },
+  "plugins": [
+    {
+      "name": "example-skill",
+      "description": "Placeholder plugin — replace with a real skill, then add one entry here per plugin.",
+      "source": "./plugins/example-skill",
+      "category": "productivity"
+    }
+  ]
+}

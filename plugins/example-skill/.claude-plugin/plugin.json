@@ -1,0 +1,8 @@
+{
+  "name": "example-skill",
+  "description": "Placeholder plugin — replace this description once the skill does something real.",
+  "author": {
+    "name": "Jan Pesa",
+    "email": "jan.pesa@graphaware.com"
+  }
+}
