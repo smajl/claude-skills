@@ -3,10 +3,14 @@
 // branches you checked out, and whether the tree is still dirty.
 //
 //   node collect-git.mjs --from 2026-07-29 --to 2026-07-29 [--repos a,b] [--config path]
+//
+// Commits are attributed to the day the code was *written* — the author date.
+// See the long comment above the log call for why that is the only date that
+// survives contact with a real workflow.
 
 import { basename } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
-import { dayWindow, findRepos, localToday, parseArgs, prune, readConfig, resolveTimezone, run, emit, fail, ticketKeys } from './lib.mjs'
+import { dayWindow, findRepos, localToday, parseArgs, prune, readConfig, resolveTimezone, run, emit, fail, ticketKeys, withinWindow } from './lib.mjs'
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = args.config ? JSON.parse(readFileSync(args.config, 'utf8')) : readConfig()
@@ -16,6 +20,9 @@ if (!args.from) fail('--from is required (YYYY-MM-DD)')
 const from = String(args.from)
 const to = String(args.to || args.from)
 const full = Boolean(args.full)
+// 'author' = when the code was written (default). 'committer' = when the
+// commit object last took its current form. Only override deliberately.
+const dateBasis = args['date-basis'] === 'committer' ? 'committer' : 'author'
 const tz = args.tz ? String(args.tz) : resolveTimezone(cfg)
 const window = dayWindow(from, to, tz)
 const authors = cfg.identity?.gitAuthors || []
@@ -37,8 +44,17 @@ if (Array.isArray(only) && only.length) {
 }
 paths = paths.filter((p) => !exclude.has(basename(p)))
 
-const SEP = String.fromCharCode(31) // matches %x1f in the git format strings below
+const SEP = String.fromCharCode(31) // %x1f — between fields
+const REC = String.fromCharCode(2)  // %x02 — start of a commit record
+const EOM = String.fromCharCode(30) // %x1e — end of metadata, numstat follows
 const today = localToday(tz)
+
+// A squash merge is the one rewrite that genuinely destroys the authoring
+// date: the squashed commit is authored at squash time, and the originals
+// live on only in the (usually deleted) branch. Detect it so the agent can
+// treat it as a duplicate of work already counted, not as new work.
+const MR_REF = /See merge request\s+(\S+![0-9]+)/i
+const PR_REF = /^.*\(#([0-9]+)\)$/
 
 // Several checkouts of the same remote (hume-web, hume-web-2.28, hume-web-3.0)
 // each report the same commits. Key logical repos by remote URL so the same
@@ -47,40 +63,77 @@ const byRemote = new Map()
 
 for (const path of paths) {
   const authorArgs = authors.flatMap((a) => ['--author', a])
-  // Offset-bearing bounds: a bare "2026-07-30 00:00:00" would be read in the
-  // machine's local timezone, which need not be the user's configured one.
+  // Attribution by author date, and why the bounds look lopsided.
+  //
+  // git's --since/--until select on the *committer* date, which rebase, amend
+  // and cherry-pick all reset to "now". Filtering on it means a commit written
+  // Tuesday and rebased Friday disappears from Tuesday and resurfaces on
+  // Friday — missing from the day it belongs to, and double-counted on a day
+  // it doesn't. The author date survives all three rewrites, so it is the only
+  // honest answer to "when was this code written".
+  //
+  // There is no --author-since. But a commit is always committed at or after
+  // it is authored, so every commit authored in the window necessarily has a
+  // committer date at or after the window start. Passing --since alone yields
+  // a superset; --until must be omitted, or it would drop exactly the rebased
+  // commits we are trying to rescue. The precise filter happens below.
+  const bounds = dateBasis === 'author'
+    ? [`--since=${window.since}`]
+    : [`--since=${window.since}`, `--until=${window.until}`]
+
   const log = run('git', [
-    '-C', path, 'log', '--all', '--no-merges', ...authorArgs,
-    `--since=${window.since}`, `--until=${window.until}`,
-    `--pretty=format:@@@%H${SEP}%aI${SEP}%s${SEP}%D`,
+    '-C', path, 'log', '--all', '--no-merges', ...authorArgs, ...bounds,
+    `--pretty=format:${REC}%H${SEP}%aI${SEP}%cI${SEP}%D${SEP}%s${SEP}%b${EOM}`,
     '--numstat',
   ])
   if (!log.ok) continue
 
   const commits = []
-  let current = null
-  for (const line of log.out.split('\n')) {
-    if (line.startsWith('@@@')) {
-      const [sha, date, subject, refs] = line.slice(3).split(SEP)
-      current = {
-        sha: sha.slice(0, 10),
-        date,
-        subject,
-        refs: refs || '',
-        files: 0,
-        insertions: 0,
-        deletions: 0,
-        tickets: ticketKeys(`${subject} ${refs}`, pattern),
-      }
-      commits.push(current)
-      continue
+  // Split on the record marker rather than scanning line by line: commit
+  // bodies are multi-line, and we need the body to spot squash merges.
+  for (const chunk of log.out.split(REC).slice(1)) {
+    const cut = chunk.indexOf(EOM)
+    if (cut === -1) continue
+    const [sha, authored, committed, refs, subject, body] = chunk.slice(0, cut).split(SEP)
+
+    const commit = {
+      sha: sha.slice(0, 10),
+      date: dateBasis === 'author' ? authored : committed,
+      subject,
+      refs: refs || '',
+      files: 0,
+      insertions: 0,
+      deletions: 0,
+      tickets: ticketKeys(`${subject} ${refs}`, pattern),
     }
-    const m = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/)
-    if (m && current) {
-      current.files++
-      current.insertions += m[1] === '-' ? 0 : Number(m[1])
-      current.deletions += m[2] === '-' ? 0 : Number(m[2])
+
+    // Surface the rewrite rather than hiding it: a >1h gap means this commit
+    // was rebased, amended or cherry-picked after it was written.
+    if (Math.abs(Date.parse(committed) - Date.parse(authored)) > 3600_000) {
+      commit.committed = committed
+      commit.rewritten = true
     }
+
+    const mr = MR_REF.exec(body || '')
+    const pr = PR_REF.exec(subject || '')
+    if (mr || pr) {
+      commit.squashedFrom = mr ? mr[1] : `#${pr[1]}`
+      // The author date of a squash IS the squash time, so this is the one
+      // commit whose date does not mean "when the code was written".
+      commit.dateUnreliable = true
+    }
+
+    for (const line of chunk.slice(cut + 1).split('\n')) {
+      const m = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/)
+      if (!m) continue
+      commit.files++
+      commit.insertions += m[1] === '-' ? 0 : Number(m[1])
+      commit.deletions += m[2] === '-' ? 0 : Number(m[2])
+    }
+
+    // The precise author-date filter the git bounds above could not express.
+    if (dateBasis === 'author' && !withinWindow(authored, window)) continue
+    commits.push(commit)
   }
 
   // Branch checkouts in the window — evidence of work that produced no commit.
@@ -166,4 +219,4 @@ const repos = [...byRemote.values()].map((e) => {
   })
 })
 
-emit({ ok: true, source: 'git', from, to, window, scanned: paths.length, repos })
+emit({ ok: true, source: 'git', from, to, window, dateBasis, scanned: paths.length, repos })

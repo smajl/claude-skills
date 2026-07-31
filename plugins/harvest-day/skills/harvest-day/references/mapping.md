@@ -107,6 +107,13 @@ review, `1.5` for a threaded design argument. Judge it from the comment
 excerpts the collectors return — surfacing them is the whole reason they're
 there. A threaded design argument outweighs ten "👍" replies.
 
+**Score no commit marked `dateUnreliable`.** That flag means a squash merge:
+its diff is the whole branch replayed, and every line of it was already scored
+on the days it was actually written. Counting it again would bill the same work
+twice, and at squash-day rates. Mention it in the row's Why column — "merged
+!412" is a real event worth a few minutes — but let the score come from the
+underlying commits, not from the squash.
+
 #### 2. Score → hours
 
 `hours = score × harvest.calibration.hoursPerScore`, rounded to 0.25, floored

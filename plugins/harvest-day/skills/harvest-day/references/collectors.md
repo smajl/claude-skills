@@ -39,10 +39,11 @@ the day's total looks odd.
 node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/collect-git.mjs" --from 2026-07-29 --to 2026-07-29
 ```
 
-Per repo: `commits[]` (sha, ISO date, subject, insertions, deletions, files,
-`tickets[]`), `branches[]` (from refs *and* reflog checkouts, so branches worked
-on without a commit still show up), `branchTickets[]`, `dirty` (only when the
-range includes today), and `totals`. `--full` adds each commit's raw `%D` refs,
+Per repo: `commits[]` (sha, author `date`, subject, insertions, deletions,
+files, `tickets[]`, plus `rewritten` / `squashedFrom` where they apply),
+`branches[]` (from refs *and* reflog checkouts, so branches worked on without a
+commit still show up), `branchTickets[]`, `dirty` (only when the range includes
+today), and `totals`. `--full` adds each commit's raw `%D` refs,
 which are otherwise omitted — `branches[]` and `branchTickets[]` are the same
 information, already deduplicated.
 
@@ -53,7 +54,37 @@ Reads `repos.include` from config, or every repo under `repos.roots` when the
 include list is empty. Author matching uses every string in
 `identity.gitAuthors` as an OR'd `--author` regex.
 
-Interpreting it:
+### Which day a commit belongs to
+
+A commit carries two dates. The **author date** is stamped when the code is
+first committed and survives rebase, amend and cherry-pick. The **committer
+date** is reset to "now" by every one of those operations.
+
+git's `--since` / `--until` select on the committer date. Filtering on it means
+a commit written Tuesday and rebased Friday vanishes from Tuesday and reappears
+on Friday — absent from the day it belongs to, double-counted on a day it
+doesn't. So the collector filters on the **author date**, and `commits[].date`
+is the author date: the day the code was actually written.
+
+This also makes catch-up runs work. Reconstructing Monday on Friday, after
+Monday's branch was rebased Tuesday, still finds Monday's commits under
+Monday — the rewritten objects kept their authoring dates.
+
+Two fields flag the cases where the dates disagree:
+
+- `rewritten: true` with `committed: <iso>` — author and committer dates differ
+  by more than an hour, so the commit was rebased, amended or cherry-picked
+  after it was written. Attribution is still correct; this is context.
+- `dateUnreliable: true` with `squashedFrom: "group/proj!412"` — a **squash
+  merge**, the one rewrite that really does destroy the authoring date. The
+  squashed commit is authored at squash time, and the original commits live on
+  only in the (usually deleted) branch. Treat it as a duplicate of work already
+  counted on earlier days, not as new work. See `mapping.md`.
+
+`--date-basis committer` restores the old behaviour. There is little reason to
+use it outside of debugging.
+
+Interpreting the rest:
 
 - Commit timestamps bracket the working window but are not the working window —
   people commit in bursts. Use them for ordering and for detecting a day's shape,
@@ -61,8 +92,9 @@ Interpreting it:
 - `insertions + deletions` is the crudest possible effort proxy. A 2000-line
   lockfile churn is not eight hours. Discount generated files, lockfiles and
   vendored paths when you see them in the diffstat.
-- Commits pushed today for work done yesterday are common. If commit evidence
-  wildly outstrips the day's plausible hours, say so rather than inflating.
+- Pushing today what was written yesterday is common, and handled: attribution
+  follows the author date, not the push. If commit evidence still wildly
+  outstrips the day's plausible hours, say so rather than inflating.
 
 ## GitLab — `collect-gitlab.mjs`
 
