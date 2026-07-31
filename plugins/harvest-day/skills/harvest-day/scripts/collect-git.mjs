@@ -10,7 +10,7 @@
 
 import { basename } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
-import { dayWindow, findRepos, localToday, parseArgs, prune, readConfig, resolveTimezone, run, emit, fail, ticketKeys, withinWindow } from './lib.mjs'
+import { dayWindow, findRepos, localToday, parseArgs, prune, readConfig, repoSlug, resolveTimezone, run, emit, fail, ticketKeys, withinWindow } from './lib.mjs'
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = args.config ? JSON.parse(readFileSync(args.config, 'utf8')) : readConfig()
@@ -199,6 +199,9 @@ const repos = [...byRemote.values()].map((e) => {
   return prune({
     name: e.name,
     remote: e.remote,
+    // Join key against GitLab's path_with_namespace — see mapping.md, the
+    // same push must not be counted once here and again as a GitLab event.
+    slug: repoSlug(e.remote),
     // Only interesting when there's more than one — a single path is already
     // implied by the repo name.
     paths: e.paths.length > 1 ? e.paths : null,

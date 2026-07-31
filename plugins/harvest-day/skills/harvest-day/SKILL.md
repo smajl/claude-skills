@@ -44,10 +44,15 @@ run the user actually asked for.
 - Explicit date, `today`, `yesterday`, `last friday`, `this week`, `last week`,
   or `2026-07-27..2026-07-31` — all accepted.
 - **No date given**: call Harvest `list_time_entries` with the user's
-  `user_ids` for the last `rules.catchUpWindowDays` days, sum hours per day, and
-  list workdays that are empty or under `harvest.targetHoursPerDay`. Ask which
-  to fill. When `rules.skipWeekends`, skip weekends unless the user logged time
-  on one before.
+  `user_ids` and `limit: 500` for the last `rules.catchUpWindowDays` days, sum
+  hours per day, and list workdays that are empty or under
+  `harvest.targetHoursPerDay`. Ask which to fill. When `rules.skipWeekends`,
+  skip weekends unless the user logged time on one before.
+- That call is paginated. **A day looks empty both when nothing was logged and
+  when the page ran out** — so if the response has `truncated: true`, follow
+  `next_cursor` (same parameters, opaque token) before deciding anything is
+  empty. If `scope_limited` is true, permissions are hiding entries: say so and
+  don't report zeros as fact.
 - Process one day at a time. A range is a loop over days, each with its own
   proposal and its own confirmation.
 
@@ -78,7 +83,9 @@ Group evidence into candidate entries. Rules in `references/mapping.md`.
    that isn't all-day, OOO, or declined.
 2. **Ticket work** — one cluster per ticket key, mined from commit subjects,
    branch names, MR titles, review comments and Jira. Merge clusters sharing a key.
-3. **Untracked work** — evidence with no ticket key, grouped by repo.
+3. **Untracked work** — evidence with no ticket key, grouped by repo. Local
+   commits and the GitLab pushes that carried them are one cluster, not two —
+   join on the repo slug per `references/mapping.md`.
 4. **Review clusters** — MRs the user commented on or approved but didn't author.
    These are separate from their own ticket work; they are the most commonly
    forgotten entries, so surface them even when small.
@@ -130,6 +137,10 @@ Already in Harvest for this date: none.
 Sources: git ✓  gitlab ✓  calendar ✓  jira ✓  granola ✗ (not authenticated)
 ```
 
+- The header shows the real sum of each column. When fill can't reach target —
+  meetings-only days, thin evidence — print the gap rather than the target:
+  `evidence 2.5h · fill 2.5h · target 8h · 5.5h unaccounted`. Never print a
+  fill figure the rows don't add up to.
 - Always run `list_time_entries` for that date and user first, and show what's
   already there. If a proposed row duplicates an existing entry, mark it and
   default to skipping it.

@@ -36,9 +36,22 @@ Pull the user's own Harvest entries for the last 90 days
 setup step: it reveals which task they use for meetings, which for bugfix work,
 how they phrase notes, and their typical daily total.
 
+**Paginate it.** 90 days of a daily logger is several hundred entries and the
+page size caps at 500, so pass `limit: 500` and keep following `next_cursor`
+while `truncated` is true, holding every other parameter identical. Skipping
+this doesn't fail loudly — it silently derives the note style, the routing
+table and the calibration below from only the most recent slice of history.
+
+Take aggregates from the aggregate endpoint, which can't be truncated:
+`get_time_report` with `group_by: "project"` over the same 90 days gives the
+project totals directly. Use it for `defaultProjectId`, and use the raw entries
+for the things only individual entries can show — phrasing, per-task medians,
+recurring note patterns. Note that `get_time_report` cannot group by day, so
+per-day totals still have to come from the entries.
+
 Derive and store:
 
-- `harvest.defaultProjectId` — the project with the most of their entries
+- `harvest.defaultProjectId` — the project with the most of their hours
 - `harvest.learnedRoutes` — recurring note patterns → task id, e.g. any note
   matching a standup/sync/1on1/retro/demo phrase → the meetings task
 - `harvest.noteStyle` — one sentence describing their phrasing, quoted back to

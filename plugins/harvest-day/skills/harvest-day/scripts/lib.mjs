@@ -98,6 +98,21 @@ export function ticketKeys(text, pattern) {
   return [...new Set(String(text).match(re) || [])]
 }
 
+// "git@gitlab.com:acme/web.git" -> "acme/web". The same value GitLab reports
+// as path_with_namespace, so a local repo and a GitLab event stream can be
+// recognised as the same thing and not counted twice.
+export function repoSlug(remote) {
+  if (!remote) return null
+  const s = String(remote).trim().replace(/\/+$/, '').replace(/\.git$/, '')
+  // scp-like: [user@]host:group/sub/proj
+  let m = s.match(/^(?:[^@/]+@)?([^/:]+):(?!\/)(.+)$/)
+  if (m) return m[2].replace(/^\/+/, '') || null
+  // url form: scheme://[user@]host[:port]/group/sub/proj
+  m = s.match(/^[a-z][a-z0-9+.-]*:\/\/[^/]+\/(.+)$/i)
+  if (m) return m[1].replace(/^\/+/, '') || null
+  return null
+}
+
 export function isGitRepo(dir) {
   return existsSync(join(dir, '.git'))
 }

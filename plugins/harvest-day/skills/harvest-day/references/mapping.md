@@ -65,6 +65,34 @@ Mark the row `?` and ask when:
 
 Asking is cheap; a wrong entry that gets approved is not.
 
+## One piece of work, several sources
+
+Most sources see different things. Two of them see the same thing, and will
+double-count it unless told not to.
+
+**git commits and GitLab pushes are the same work.** A push event is the
+delivery of commits the local collector already has, with a diffstat and an
+author date attached. Join them on `repos[].slug` from git against
+`pushes[].project` from GitLab — both are `group/project` — and then:
+
+- Slug matches a local repo → **git wins.** It has the diff volume and the
+  real authoring dates. The push contributes nothing to the score; at most it
+  confirms the work left the machine.
+- Slug has no local repo → the push is the *only* evidence, so it becomes its
+  own cluster. This is the case the join exists to protect: a repo not cloned
+  on this machine would otherwise vanish entirely. Score it from
+  `pushes[].commits`, and say in the Why column that there's no local checkout,
+  since no diff volume is available to size it properly.
+
+The same logic applies to "untracked work grouped by repo": build those
+clusters from local git, then fold in only the GitLab pushes whose slug found
+no local match. Never create one cluster from the commits and a second from
+the pushes that carried them.
+
+MR review activity is *not* covered by this rule — reviewing someone else's MR
+leaves no local commits, so `reviews[]` is independent evidence and is scored
+on its own.
+
 ## Estimation
 
 ### Meetings
@@ -153,7 +181,25 @@ answer depends on which cluster you happen to size first.
 clusters proportional to evidence score, rounded to 0.25, with the largest
 cluster absorbing rounding drift so the day lands exactly on target.
 
-If `remaining <= 0` (a day of nothing but meetings), fill == evidence and say so.
+Three cases where that doesn't apply, all of them reachable:
+
+- **`remaining <= 0`** — a day of nothing but meetings. Fill == evidence. The
+  day is over target on meetings alone; say so and let the user trim.
+- **`remaining > 0` but no work clusters at all** — meetings and nothing else.
+  There is nothing to distribute across, and inventing a row to reach target
+  would be inventing evidence, which this skill does not do. Fill == evidence,
+  the day lands under target, and the footer states the gap plainly: "2.5h
+  unaccounted for — no code, review or document evidence found." Then suggest
+  where it might have gone: a source that's disabled or errored, an untracked
+  repo, Slack, or simply a day that wasn't 8 hours.
+- **`remaining` is large relative to the evidence** — one 1-commit cluster
+  should not silently absorb 7 hours. When a cluster's fill exceeds `3 ×` its
+  evidence estimate, cap it there, leave the day short, and flag the row
+  `← thin`. A visible shortfall the user can correct beats a plausible-looking
+  number they can't check.
+
+In all three, the fill column is allowed to miss the target. The header shows
+the real sum, never the target dressed up as one.
 
 ### Both columns
 
@@ -171,7 +217,9 @@ rubber-stamp.
 
 ## Safety
 
-- Read Harvest before writing: `list_time_entries` for that date and user.
+- Read Harvest before writing: `list_time_entries` for that date and user. One
+  day fits in a page, but check `truncated` anyway — "no existing entries" is
+  the answer that causes a double-log, so it's the one worth being sure about.
 - A proposed row whose task and note closely match an existing entry is a
   duplicate — mark it and default to skipping.
 - One `log_time` per confirmed row. On partial failure, report exactly which
