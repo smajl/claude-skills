@@ -37,14 +37,16 @@
       { "match": "fix|bug|refactor|maintenance|upgrade|chore", "taskId": 0, "taskName": "Maintenance" },
       { "match": ".*", "taskId": 0, "taskName": "Feature" }
     ],
-    "learnedRoutes": []
+    "learnedRoutes": [],
+    "calibration": {
+      "hoursPerScore": 0.28,
+      "medianHoursByTask": {},
+      "computedFrom": null,
+      "samples": 0
+    }
   },
   "rules": {
-    "workdayStart": "09:00",
-    "workdayEnd": "17:30",
     "skipWeekends": true,
-    "skipDeclinedMeetings": true,
-    "skipAllDayEvents": true,
     "ignoreEventPatterns": ["ooo", "out of office", "holiday", "focus", "lunch", "blocked", "pto"],
     "catchUpWindowDays": 14
   }

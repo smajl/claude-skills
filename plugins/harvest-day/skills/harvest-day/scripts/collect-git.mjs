@@ -6,7 +6,7 @@
 
 import { basename } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
-import { findRepos, parseArgs, readConfig, run, emit, fail, ticketKeys } from './lib.mjs'
+import { dayWindow, findRepos, localToday, parseArgs, prune, readConfig, resolveTimezone, run, emit, fail, ticketKeys } from './lib.mjs'
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = args.config ? JSON.parse(readFileSync(args.config, 'utf8')) : readConfig()
@@ -15,6 +15,9 @@ if (!args.from) fail('--from is required (YYYY-MM-DD)')
 
 const from = String(args.from)
 const to = String(args.to || args.from)
+const full = Boolean(args.full)
+const tz = args.tz ? String(args.tz) : resolveTimezone(cfg)
+const window = dayWindow(from, to, tz)
 const authors = cfg.identity?.gitAuthors || []
 if (!authors.length) fail('config.identity.gitAuthors is empty')
 
@@ -35,7 +38,7 @@ if (Array.isArray(only) && only.length) {
 paths = paths.filter((p) => !exclude.has(basename(p)))
 
 const SEP = String.fromCharCode(31) // matches %x1f in the git format strings below
-const today = new Date().toISOString().slice(0, 10)
+const today = localToday(tz)
 
 // Several checkouts of the same remote (hume-web, hume-web-2.28, hume-web-3.0)
 // each report the same commits. Key logical repos by remote URL so the same
@@ -44,9 +47,11 @@ const byRemote = new Map()
 
 for (const path of paths) {
   const authorArgs = authors.flatMap((a) => ['--author', a])
+  // Offset-bearing bounds: a bare "2026-07-30 00:00:00" would be read in the
+  // machine's local timezone, which need not be the user's configured one.
   const log = run('git', [
     '-C', path, 'log', '--all', '--no-merges', ...authorArgs,
-    `--since=${from} 00:00:00`, `--until=${to} 23:59:59`,
+    `--since=${window.since}`, `--until=${window.until}`,
     `--pretty=format:@@@%H${SEP}%aI${SEP}%s${SEP}%D`,
     '--numstat',
   ])
@@ -81,7 +86,7 @@ for (const path of paths) {
   // Branch checkouts in the window — evidence of work that produced no commit.
   const reflog = run('git', [
     '-C', path, 'reflog', '--date=iso-strict',
-    `--since=${from} 00:00:00`, `--until=${to} 23:59:59`,
+    `--since=${window.since}`, `--until=${window.until}`,
     '--pretty=format:%gd%x1f%gs',
   ])
   const branches = new Set()
@@ -138,12 +143,18 @@ for (const path of paths) {
 
 const repos = [...byRemote.values()].map((e) => {
   const branches = [...e.branches]
-  return {
+  return prune({
     name: e.name,
     remote: e.remote,
-    paths: e.paths,
-    duplicateCheckouts: e.paths.length > 1,
-    commits: e.commits.sort((a, b) => a.date.localeCompare(b.date)),
+    // Only interesting when there's more than one — a single path is already
+    // implied by the repo name.
+    paths: e.paths.length > 1 ? e.paths : null,
+    duplicateCheckouts: e.paths.length > 1 || null,
+    commits: e.commits
+      .sort((a, b) => a.date.localeCompare(b.date))
+      // `refs` is raw `%D`; it has already been distilled into branches[] and
+      // branchTickets[] below, so shipping it again is pure duplication.
+      .map((c) => prune(full ? c : { ...c, refs: null })),
     branches,
     branchTickets: ticketKeys(branches.join(' '), pattern),
     dirty: e.dirty,
@@ -152,7 +163,7 @@ const repos = [...byRemote.values()].map((e) => {
       insertions: e.commits.reduce((s, c) => s + c.insertions, 0),
       deletions: e.commits.reduce((s, c) => s + c.deletions, 0),
     },
-  }
+  })
 })
 
-emit({ ok: true, source: 'git', from, to, scanned: paths.length, repos })
+emit({ ok: true, source: 'git', from, to, window, scanned: paths.length, repos })

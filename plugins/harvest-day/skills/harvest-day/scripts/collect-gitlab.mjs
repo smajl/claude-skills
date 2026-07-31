@@ -6,7 +6,7 @@
 //   node collect-gitlab.mjs --from 2026-07-29 --to 2026-07-29 [--config path]
 
 import { readFileSync } from 'node:fs'
-import { dayAfter, dayBefore, parseArgs, readConfig, run, emit, fail, ticketKeys } from './lib.mjs'
+import { dayAfter, dayBefore, dayWindow, parseArgs, prune, readConfig, resolveTimezone, run, emit, fail, ticketKeys, withinWindow } from './lib.mjs'
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = args.config ? JSON.parse(readFileSync(args.config, 'utf8')) : readConfig()
@@ -15,6 +15,9 @@ if (!args.from) fail('--from is required (YYYY-MM-DD)')
 
 const from = String(args.from)
 const to = String(args.to || args.from)
+const tz = args.tz ? String(args.tz) : resolveTimezone(cfg)
+const window = dayWindow(from, to, tz)
+const full = Boolean(args.full)
 const pattern = cfg.ticketPattern
 const host = cfg.sources?.gitlab?.host
 
@@ -36,11 +39,22 @@ if (!/Logged in/i.test(`${auth.out || ''}${auth.err || ''}${auth.error || ''}`))
   fail('glab is not authenticated — run `glab auth login`')
 }
 
-// GitLab's after/before on /events are exclusive, so widen by a day each side
-// and filter precisely on created_at afterwards.
+// GitLab's after/before on /events are exclusive *UTC dates*, while the window
+// we actually want is a local day — which for a UTC+2 user starts at 22:00 UTC
+// the previous day. Widen by two days each side so the API can't clip an edge,
+// then filter precisely on the created_at instant.
+// Pagination stops at maxPages so a pathological account can't spin forever.
+// Hitting that stop means the day is genuinely under-reported, which is worth
+// saying out loud rather than quietly returning a thinner day.
+const maxPages = Number(args['max-pages'] || 5)
 const events = []
-for (let page = 1; page <= 5; page++) {
-  const r = api(`events?after=${dayBefore(from)}&before=${dayAfter(to)}&per_page=100&page=${page}`)
+let truncated = false
+for (let page = 1; ; page++) {
+  if (page > maxPages) {
+    truncated = true
+    break
+  }
+  const r = api(`events?after=${dayBefore(from, 2)}&before=${dayAfter(to, 2)}&per_page=100&page=${page}`)
   if (!r.ok) fail(`glab events failed: ${r.error}`)
   if (!Array.isArray(r.data) || r.data.length === 0) break
   events.push(...r.data)
@@ -57,12 +71,7 @@ function projectPath(id) {
   return path
 }
 
-const inWindow = (iso) => {
-  const day = String(iso).slice(0, 10)
-  return day >= from && day <= to
-}
-
-const normalized = events.filter((e) => inWindow(e.created_at)).map((e) => {
+const normalized = events.filter((e) => withinWindow(e.created_at, window)).map((e) => {
   const note = e.note || null
   const title = e.target_title || e.push_data?.commit_title || null
   const ref = e.push_data?.ref || null
@@ -102,13 +111,52 @@ for (const e of normalized) {
   if (e.noteExcerpt && reviewsByMr[key].excerpts.length < 3) reviewsByMr[key].excerpts.push(e.noteExcerpt)
 }
 
-emit({
+// Pushes roll up by branch: ten pushes to one branch are one piece of work,
+// and the individual events say nothing the local git collector doesn't say
+// better.
+const pushesByRef = {}
+for (const e of normalized) {
+  if (!/pushed/i.test(e.action)) continue
+  const key = `${e.project}@${e.ref || '?'}`
+  pushesByRef[key] ??= { project: e.project, ref: e.ref, pushes: 0, commits: 0, tickets: e.tickets, first: e.at, last: e.at }
+  const p = pushesByRef[key]
+  p.pushes++
+  p.commits += e.commitCount || 0
+  if (e.at < p.first) p.first = e.at
+  if (e.at > p.last) p.last = e.at
+}
+
+const isReview = (e) => /commented|approved/i.test(e.action)
+const isPush = (e) => /pushed/i.test(e.action)
+
+// MR lifecycle events carry the titles that become note text.
+const mrs = normalized
+  .filter((e) => !isReview(e) && !isPush(e) && e.targetType === 'MergeRequest')
+  .map((e) => prune({ at: e.at, action: e.action, project: e.project, title: e.title, url: e.url, tickets: e.tickets }))
+
+// Everything else (issues, milestones, joins) — kept, but one line each.
+const other = normalized
+  .filter((e) => !isReview(e) && !isPush(e) && e.targetType !== 'MergeRequest')
+  .map((e) => prune({ at: e.at, action: e.action, targetType: e.targetType, project: e.project, title: e.title, tickets: e.tickets }))
+
+emit(prune({
   ok: true,
   source: 'gitlab',
   from,
   to,
+  window,
   user: cfg.identity?.gitlabUsername || null,
+  // Non-null only when the page cap cut the feed short. Say so in the
+  // proposal's footer — the day's evidence is incomplete.
+  truncated: truncated || null,
+  truncatedNote: truncated
+    ? `stopped after ${maxPages} pages (${events.length} events); re-run with --max-pages to see the rest`
+    : null,
   summary,
   reviews: Object.values(reviewsByMr),
-  events: normalized,
-})
+  pushes: Object.values(pushesByRef),
+  mrs,
+  other,
+  // The rollups above cover every event; the raw feed is opt-in for debugging.
+  events: full ? normalized : null,
+}))

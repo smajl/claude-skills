@@ -2,19 +2,31 @@
 
 ## Routing to project + task
 
-Apply in order; first match wins:
+Every rule that matches text does so the same way: **`match` is a
+case-insensitive regular expression**, tested against the cluster's combined
+text (ticket summary + commit subjects + event title + note text). This holds
+for both `harvest.taskRules` and `harvest.learnedRoutes` — they are not two
+different matching schemes.
+
+**Project** — apply in order; first match wins:
 
 1. **`harvest.learnedRoutes`** — user-confirmed corrections from past runs.
-   These always beat heuristics.
-2. **Ticket prefix** — `sources.jira.projectRouting` maps a key prefix to a
+   Each carries both a `projectId` and a `taskId`, so a match here settles the
+   whole route and the task step below is skipped. These always beat heuristics.
+2. **A `harvest.taskRules` entry that carries a `projectId`** — a rule may
+   override the project as well as the task, for work that always lives
+   somewhere other than the default (interviews under Engineering, say). Only
+   entries that actually have a `projectId` participate here; most don't.
+3. **Ticket prefix** — `sources.jira.projectRouting` maps a key prefix to a
    project (`HUME-*` → HUME).
-3. **Repo** — `repos.projectByRepo` maps a repo name to a project.
-4. **Event/meeting heuristics** — see below.
-5. **Default** — `harvest.defaultProjectId`.
+4. **Repo** — `repos.projectByRepo` maps a repo name to a project.
+5. **Event/meeting heuristics** — see below.
+6. **Default** — `harvest.defaultProjectId`.
 
-Within a project, pick the task from `harvest.taskRules`, which is a list of
-`{ match, taskId }` evaluated in order against the cluster's combined text
-(ticket summary + commit subjects + event title).
+**Task** — unless step 1 already settled it, walk `harvest.taskRules` in order
+and take the `taskId` of the first entry whose `match` hits. Keep a `".*"`
+catch-all last so every cluster lands somewhere; doctor warns when it's
+missing.
 
 ### Meeting heuristics
 
@@ -72,23 +84,61 @@ Confluence comments during a 1-to-1) is worth flagging as "possibly partial".
 
 ### Work clusters — evidence estimate
 
-Score each cluster, then map score to hours against the user's own history for
-comparable work rather than a fixed table:
+Three steps: score the cluster, convert the score to hours, bound the result
+against what the user actually logs.
 
-| Signal | Weight |
+#### 1. Score
+
+| Signal | Points |
 |---|---|
-| Commits | strong — but sub-linear; 12 tiny commits ≠ 12× one commit |
-| Meaningful diff lines (excl. lockfiles, generated, vendored) | moderate |
-| Distinct files and directories touched | moderate — breadth implies context-switching |
-| MR opened / merged | small fixed increment (description, CI, cleanup) |
-| Review comments authored | strong for review clusters; scale with substance |
-| Jira transitions / comments | small, but rescues no-commit days |
-| Confluence comments on a page | strong — scale with substance, not count; a threaded design argument outweighs ten "👍" replies |
-| Confluence page authored / edited | moderate, only when the user is the last modifier |
-| Branch touched, no commit | small floor — real work happened |
+| Commits | `2 × √n` — sub-linear on purpose; 12 tiny commits ≠ 12× one commit |
+| Meaningful diff lines (excl. lockfiles, generated, vendored) | `lines ÷ 150`, cap 6 |
+| Distinct directories touched | `0.4` each, cap 3 — breadth implies context-switching |
+| MR opened | `1` — description, CI, cleanup |
+| MR merged | `0.5` — rebase, conflicts, watching the pipeline |
+| Review comments authored | `1.5 × √n × substance` |
+| Confluence comments on a page | `1.5 × √n × substance` |
+| Confluence page authored / edited | `2`, only when the user is the last modifier |
+| Jira transition or comment | `0.5` each, cap 2 — small, but rescues no-commit days |
+| Branch touched, no commit | `0.5` — real work happened, it just didn't land |
 
-Floor a cluster with any evidence at 0.25h. Cap any single work cluster at the
-day's remaining unallocated hours.
+`substance` is `0.5` for rubber stamps ("👍", "nit: typo"), `1` for ordinary
+review, `1.5` for a threaded design argument. Judge it from the comment
+excerpts the collectors return — surfacing them is the whole reason they're
+there. A threaded design argument outweighs ten "👍" replies.
+
+#### 2. Score → hours
+
+`hours = score × harvest.calibration.hoursPerScore`, rounded to 0.25, floored
+at 0.25 for any cluster with evidence at all. The shipped default of `0.28`
+h/point gives:
+
+| Score | 1 | 2 | 4 | 7 | 11 | 18 |
+|---|---|---|---|---|---|---|
+| Hours | 0.25 | 0.5 | 1.25 | 2 | 3 | 5 |
+
+**These numbers are a chosen starting point, not a measurement.** Their job is
+to make two similar days produce similar estimates, and to give the user
+something concrete to correct rather than a number invented fresh each run.
+Phase 8 tightens `hoursPerScore` from those corrections — after a few runs it
+is the user's number, and it should be trusted over this table.
+
+#### 3. Bound against history
+
+`harvest.calibration.medianHoursByTask` maps task id → the median hours the
+user logs per entry on that task, computed at setup from 90 days of their own
+entries. It is the only measured quantity in this section, so use it as a
+bound rather than as the estimate:
+
+- Above `2 ×` the median for that task → probably over-scored. Keep the number
+  but append `← large` to the row so it draws the eye.
+- Below `0.25 ×` the median → probably a fragment of something bigger; check
+  whether it should merge into a neighbouring cluster.
+- No entry for that task id → no bound available, estimate as-is.
+
+Cap any single work cluster at `targetHoursPerDay − Σ meeting hours`. The cap
+is that fixed bound, not "whatever is unallocated so far" — otherwise the
+answer depends on which cluster you happen to size first.
 
 ### Work clusters — fill estimate
 

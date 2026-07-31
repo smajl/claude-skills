@@ -44,6 +44,12 @@ Derive and store:
 - `harvest.noteStyle` — one sentence describing their phrasing, quoted back to
   them for confirmation
 - `harvest.targetHoursPerDay` — median of their non-zero day totals, rounded
+- `harvest.calibration.medianHoursByTask` — `{ "<taskId>": <median hours per
+  entry> }` across those 90 days, for every task with at least 3 entries. This
+  is the only measured input the estimator has; without it the score→hours
+  conversion has nothing to check itself against (see `mapping.md`). Set
+  `computedFrom` to the date you computed it and leave `hoursPerScore` at its
+  default — Phase 8 tunes that one from the user's corrections.
 
 ## 3. Ask
 
@@ -51,7 +57,7 @@ One consolidated round of questions. Everything has a detected default:
 
 1. Repo roots and which repos to track (present `suggested`, let them add/remove)
 2. Default Harvest project, and any secondary projects to route to
-3. Target hours per day and workday window
+3. Target hours per day
 4. Which optional sources to enable: GitLab, GitHub, Jira, Calendar, Granola, Slack
 5. Timezone (default: system)
 

@@ -4,6 +4,35 @@ All collectors take an inclusive `--from` / `--to` day range and emit JSON on
 stdout. Run them in parallel. A collector that fails prints
 `{"ok": false, "error": …}` and must not abort the run.
 
+## The day window
+
+A "day" means the user's local day, but no two sources agree on how to say so:
+git parses a datetime in whatever timezone the machine is in, GitLab returns
+UTC instants, Confluence CQL is interpreted in UTC. Mixing those conventions
+files late-evening and early-morning work on the wrong day — an error nobody
+spots in a timesheet.
+
+So the window is computed once, from `identity.timezone`, and every collector
+emits it as `window`:
+
+```json
+"window": {
+  "tz": "Europe/Prague", "from": "2026-07-30", "to": "2026-07-30",
+  "since": "2026-07-30T00:00:00+02:00", "until": "2026-07-30T23:59:59+02:00",
+  "utcStart": "2026-07-29T22:00:00.000Z", "utcEnd": "2026-07-30T22:00:00.000Z",
+  "cqlStart": "2026-07-29 22:00", "cqlEnd": "2026-07-30 22:00",
+  "dstShift": null
+}
+```
+
+Use these bounds for the MCP sources too, rather than deriving your own:
+`cqlStart` / `cqlEnd` for Confluence CQL, `utcStart` / `utcEnd` for anything
+that hands back ISO instants. `--tz` overrides the configured zone.
+
+`dstShift` is non-null on the two days a year the offset changes, which are
+also the days that are 23 or 25 hours long. Worth a mention in the footer if
+the day's total looks odd.
+
 ## git — `collect-git.mjs`
 
 ```
@@ -13,7 +42,12 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/collect-git.mjs" --from 2
 Per repo: `commits[]` (sha, ISO date, subject, insertions, deletions, files,
 `tickets[]`), `branches[]` (from refs *and* reflog checkouts, so branches worked
 on without a commit still show up), `branchTickets[]`, `dirty` (only when the
-range includes today), and `totals`.
+range includes today), and `totals`. `--full` adds each commit's raw `%D` refs,
+which are otherwise omitted — `branches[]` and `branchTickets[]` are the same
+information, already deduplicated.
+
+Empty fields are omitted rather than sent as `null` or `[]`, so a repo with no
+branch activity simply has no `branches` key.
 
 Reads `repos.include` from config, or every repo under `repos.roots` when the
 include list is empty. Author matching uses every string in
@@ -36,9 +70,29 @@ Interpreting it:
 node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/collect-gitlab.mjs" --from 2026-07-29 --to 2026-07-29
 ```
 
-Wraps `glab api events`. Returns `summary` (pushes, mrsOpened, mrsMerged,
-approvals, comments), `reviews[]` grouped by MR (title, comment count, whether
-approved, up to 3 comment excerpts), and the normalized `events[]`.
+Wraps `glab api events`, rolled up into the four shapes that map onto billable
+lines. Every raw event lands in exactly one of them:
+
+| Field | What |
+|---|---|
+| `summary` | counts: pushes, mrsOpened, mrsMerged, approvals, comments |
+| `reviews[]` | grouped by MR — title, comment count, whether approved, up to 3 comment excerpts |
+| `pushes[]` | grouped by project + branch — push count, total commits, first/last timestamp |
+| `mrs[]` | MR lifecycle (opened, merged, closed) — the titles that become note text |
+| `other[]` | issues, milestones, anything else — one line each |
+
+`--full` adds the raw `events[]` feed. Don't pass it during a normal run: the
+rollups are lossless with respect to everything Phases 4–5 use, and the raw
+feed is about four times the size of all of them together.
+
+The API's `after` / `before` take UTC dates only, so the query is widened two
+days each side and the results are then filtered on the `created_at` instant
+against `window`. That widening is what keeps a 00:30-local commit — 22:30 UTC
+the previous day — on the day the user actually worked.
+
+Paging stops after 5 pages (500 events). If it stops there the output carries
+`truncated: true` and a `truncatedNote` — put that in the proposal's footer,
+because the evidence really is incomplete. `--max-pages N` fetches further.
 
 `reviews[]` is the payload that justifies review time — comment excerpts tell
 you whether a review was a rubber stamp or a real design argument. Size review
@@ -46,8 +100,9 @@ entries from comment count and substance, not from the MR's diff size.
 
 ## GitHub — optional
 
-Off unless `sources.github.enabled`. Uses `gh api "/users/<user>/events"` with
-the same normalization. `gh` is not installed by default; doctor reports it.
+Off unless `sources.github.enabled`. Uses
+`gh api "/users/<identity.githubUsername>/events"` with the same normalization.
+`gh` is not installed by default; doctor reports it.
 
 ## Calendar — Google Calendar MCP
 
@@ -101,24 +156,28 @@ CQL `created` / `lastmodified` bounds are interpreted in **UTC**, not the user's
 timezone. Verified: comments made 15:44 and 15:52 CEST match a
 `created >= "2026-07-30 13:00"` bound.
 
-So never query a bare local date. Convert the local day's midnight boundaries to
-UTC and pass them with a time component:
+So never query a bare local date — `created >= "2026-07-30"` files late-evening
+work on the wrong day. Pass `window.cqlStart` / `window.cqlEnd` from any
+collector's output, which are already the local day's midnights expressed in
+UTC with a time component:
 
 ```
-# Europe/Prague (UTC+2 in summer), local day 2026-07-30
+# window.cqlStart/cqlEnd for Europe/Prague, local day 2026-07-30
 type = comment AND creator = currentUser()
   AND created >= "2026-07-29 22:00" AND created < "2026-07-30 22:00"
 ```
-
-A bare `created >= "2026-07-30"` files late-evening work on the wrong day.
 
 ### Recipes
 
 | Want | CQL |
 |---|---|
-| Comments you wrote | `type = comment AND creator = currentUser() AND created >= "<utcStart>" AND created < "<utcEnd>"` |
-| Pages you touched | `type = page AND contributor = currentUser() AND lastmodified >= "<utcStart>" AND lastmodified < "<utcEnd>"` |
+| Comments you wrote | `type = comment AND creator = currentUser() AND created >= "<cqlStart>" AND created < "<cqlEnd>"` |
+| Pages you touched | `type = page AND contributor = currentUser() AND lastmodified >= "<cqlStart>" AND lastmodified < "<cqlEnd>"` |
 | Blog posts | same as pages with `type = blogpost` |
+
+Run the comment query always. Run the page and blogpost queries only when
+`sources.confluence.includePageEdits` — they're the noisier of the two, for the
+reason in the second limitation below.
 
 Add `order by created desc` and `limit: 50`.
 
@@ -156,6 +215,7 @@ calendar, propose it as an entry and say where it came from.
 ## Slack
 
 Use only when a day is otherwise thin, or when the user asks. Search their own
-messages in work channels for the day; a burst of substantive messages in a
-support or architecture channel is real work that leaves no other trace. Never
-quote private DM content into a Harvest note.
+messages for the day across `sources.slack.channels`, or all work channels when
+that list is empty; a burst of substantive messages in a support or
+architecture channel is real work that leaves no other trace. Never quote
+private DM content into a Harvest note.

@@ -20,6 +20,9 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/doctor.mjs"
 ```
 
 - `hasConfig: false` → go to Phase 1, then continue.
+- `canWrite: false` → the config can't produce a valid `log_time` call (usually
+  an unfinished setup leaving `0` placeholders). Fix the listed
+  `config-values` problems before Phase 7; don't discover it at the write.
 - Any failed check → report it in one line and continue with that source
   disabled. Only a dead Harvest MCP is fatal.
 - Verify the MCP sources yourself with one cheap call each, in parallel:
@@ -41,9 +44,10 @@ run the user actually asked for.
 - Explicit date, `today`, `yesterday`, `last friday`, `this week`, `last week`,
   or `2026-07-27..2026-07-31` — all accepted.
 - **No date given**: call Harvest `list_time_entries` with the user's
-  `user_ids` for the last 14 days, sum hours per day, and list workdays that are
-  empty or under `harvest.targetHoursPerDay`. Ask which to fill. Skip weekends
-  unless the user logged time on one before.
+  `user_ids` for the last `rules.catchUpWindowDays` days, sum hours per day, and
+  list workdays that are empty or under `harvest.targetHoursPerDay`. Ask which
+  to fill. When `rules.skipWeekends`, skip weekends unless the user logged time
+  on one before.
 - Process one day at a time. A range is a loop over days, each with its own
   proposal and its own confirmation.
 
@@ -58,12 +62,13 @@ Run all of these in parallel for the day. Details and field meanings in
 | GitLab | `node .../collect-gitlab.mjs --from D --to D` |
 | Calendar | Calendar MCP `list_events` for the day across `sources.calendar.calendars` |
 | Jira | Atlassian MCP: JQL for issues you touched, plus `getJiraIssue` for titles of keys found elsewhere |
-| Confluence | Atlassian MCP CQL: comments you wrote and pages you edited. **UTC bounds — see the collectors reference.** Doc review shows up nowhere else |
+| Confluence | Atlassian MCP CQL: comments you wrote and pages you edited. **CQL bounds are UTC** — use the `window.cqlStart` / `window.cqlEnd` the collectors emit, never a bare local date. Doc review shows up nowhere else |
 | Granola | search meeting notes for the day — use them for note *substance*, not for durations |
 | Slack | only when a day is thin on other evidence; look for your messages in work channels |
 
-Never invent evidence. If a source is disabled or errors, say so in the
-proposal's footer rather than silently producing a thinner day.
+Never invent evidence. If a source is disabled, errors, or reports
+`truncated`, say so in the proposal's footer rather than silently producing a
+thinner day.
 
 ## Phase 4 — cluster
 
@@ -94,14 +99,18 @@ Produce two numbers per cluster and show both:
 Meeting hours are the true calendar duration in both columns and are never
 discounted automatically — the user trims them case by case at review.
 
-- **Evidence** — meetings at their true calendar duration; work clusters sized
+- **Evidence** — meetings at their true calendar duration; work clusters scored
   from evidence volume (commits, diff size, review comments, Jira transitions)
-  against the user's historical hours for similar work. Days won't total the target.
+  and converted at `harvest.calibration.hoursPerScore`, then bounded by the
+  user's median hours for that task. Scoring table and both constants are in
+  `references/mapping.md` — use it rather than estimating freehand, so that the
+  same evidence produces the same number twice. Days won't total the target.
 - **Fill** — meetings unchanged, then `targetHoursPerDay − meetings` distributed
   across work clusters in proportion to their evidence weight.
 
-Round both to 0.25h. The account has no rounding and no timestamp timers, so log
-plain durations — never `started_time`/`ended_time`.
+Round both to `harvest.roundToHours` (0.25 by default). The account has no
+rounding and no timestamp timers, so log plain durations — never
+`started_time`/`ended_time`.
 
 ## Phase 6 — present and confirm
 
@@ -126,19 +135,35 @@ Sources: git ✓  gitlab ✓  calendar ✓  jira ✓  granola ✗ (not authentic
   default to skipping it.
 - Ask which column to use, then accept freeform edits: "row 3 → 2.5", "merge 1
   and 2", "drop 5", "row 5 is ENG/Recruiting", "notes on 3 should say …".
-- Match the user's existing note style: ticket key first, lowercase imperative
-  summary, e.g. `HUME-5720 Select V2 - remaining replacements, coding, reviews`.
-  Bundled meeting entries use a `- item` list in one note, which is also fine.
+- Match `harvest.noteStyle` — captured from their own entries at setup, and by
+  default: ticket key first, lowercase imperative summary, e.g.
+  `HUME-5720 Select V2 - remaining replacements, coding, reviews`. Bundled
+  meeting entries use a `- item` list in one note, which is also fine.
 
 ## Phase 7 — write
 
-Only after an explicit yes. One `log_time` call per row, `spent_at` = the day.
+Only after an explicit yes. Before the first call, check every confirmed row
+has a resolved project id and task id, both ≥ 1, and that no row is still
+marked `?` — Harvest rejects `0`, and a rejection halfway down the list leaves
+the day half-logged. Resolve or drop those rows first.
+
+One `log_time` call per row, `spent_at` = the day.
 Report the created entry ids and the day's total. If the user asks, and it's the
 end of a week, offer `submit_timesheet` — this account has `approval_required`.
 
 ## Phase 8 — learn
 
-When the user corrects a route, append it to `harvest.learnedRoutes` in the
-config so the next run gets it right. Keep entries as
-`{ "match": "<lowercased substring or /regex/>", "projectId": N, "taskId": N, "source": "user" }`.
+When the user corrects a **route**, append it to `harvest.learnedRoutes` so the
+next run gets it right. Keep entries as
+`{ "match": "<case-insensitive regex>", "projectId": N, "taskId": N, "source": "user" }`
+— same matching rule as `harvest.taskRules`, and both ids are required.
 Never remove a user-authored route without being asked.
+
+When the user corrects **hours**, tune the estimator. Over the work rows they
+changed (ignore meetings — those are exact, and a trim there is a judgement
+about attendance, not about sizing), compute
+`ratio = Σ accepted hours ÷ Σ proposed hours`. If it is outside 0.9–1.1, the
+scoring is systematically off, so nudge `harvest.calibration.hoursPerScore`
+one third of the way toward `hoursPerScore × ratio` and increment `samples`.
+Nudging rather than jumping keeps one unusual day from re-centring the model.
+Leave `medianHoursByTask` alone; setup recomputes it from real logged entries.
