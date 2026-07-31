@@ -85,3 +85,16 @@ line, then continue with whatever they originally asked for.
 "reconfigure harvest", "change my harvest repos" and similar → re-run only the
 relevant part and rewrite the file, preserving `harvest.learnedRoutes` entries
 whose `source` is `user`.
+
+## Upgrading an older config
+
+Doctor reports `configVersion` against `schemaVersion` and warns when the file
+predates the current shape. Re-running setup is the fix, but it must **fill in
+the gaps, not start over**: derive only the fields that are missing, keep every
+existing value, keep user-authored learned routes, and set `version` to the
+current `schemaVersion` when done.
+
+Setup is also the fix named by most other warnings, so expect it to be invoked
+to repair one field at a time. Recomputing `harvest.calibration` needs nothing
+but the 90-day entry pull from step 2 — don't make the user answer the step 3
+questions again to get it.

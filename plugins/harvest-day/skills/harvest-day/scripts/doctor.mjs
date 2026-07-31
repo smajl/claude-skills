@@ -6,10 +6,22 @@
 //   node doctor.mjs
 
 import { existsSync } from 'node:fs'
-import { configPath, findRepos, readConfig, resolveTimezone, run, emit } from './lib.mjs'
+import { configPath, findRepos, localToday, readConfig, resolveTimezone, run, emit } from './lib.mjs'
+
+// Bump whenever templates/config.example.json gains or drops a field. A config
+// written against an older schema is missing whatever was added since, and the
+// only symptom would otherwise be quietly worse output.
+const SCHEMA_VERSION = 2
 
 const cfg = readConfig()
 const checks = []
+// Two tiers, deliberately. `problems` mean the config cannot produce a valid
+// log_time call and block the write. `warnings` mean the run still works but
+// produces worse answers — a missing calibration, an unset note style. Those
+// used to degrade in silence, which is the worse failure: nobody investigates
+// output that looks fine.
+const warnings = []
+const warn = (m) => warnings.push(m)
 
 checks.push({
   name: 'config',
@@ -78,6 +90,44 @@ if (cfg) {
     detail: problems.length ? problems.join('; ') : `${tz}, ids resolved`,
     problems,
   })
+
+  // --- Quality warnings: the run works, the answers are just worse ---------
+
+  const version = Number(cfg.version || 0)
+  if (version < SCHEMA_VERSION) {
+    warn(`config is schema v${version || '?'}, current is v${SCHEMA_VERSION} — it predates fields added since, so anything new falls back to defaults. Re-run setup to fill them in.`)
+  }
+
+  const cal = cfg.harvest?.calibration
+  if (!cal) {
+    warn('harvest.calibration is missing — hour estimates use the shipped defaults with no history to check them against. Re-run setup to compute it.')
+  } else {
+    if (!(cal.hoursPerScore > 0)) {
+      warn('harvest.calibration.hoursPerScore is unset — scoring falls back to the shipped 0.28 h/point.')
+    }
+    if (!Object.keys(cal.medianHoursByTask || {}).length) {
+      warn('harvest.calibration.medianHoursByTask is empty — estimates have no historical bound, so nothing catches an over-scored cluster. Re-run setup to compute it from 90 days of entries.')
+    } else if (cal.computedFrom) {
+      const age = Math.round((Date.parse(localToday(tz)) - Date.parse(cal.computedFrom)) / 86400000)
+      if (age > 180) warn(`harvest.calibration was computed ${age} days ago — recompute it if the work has changed shape since.`)
+    }
+  }
+
+  if (!(cfg.harvest?.targetHoursPerDay > 0)) {
+    warn('harvest.targetHoursPerDay is unset — the fill column has no target to fill to.')
+  }
+  if (!cfg.harvest?.noteStyle) {
+    warn("harvest.noteStyle is unset — notes won't match the phrasing of existing entries.")
+  }
+  if (cfg.sources?.gitlab?.enabled !== false && !cfg.identity?.gitlabUsername) {
+    warn('identity.gitlabUsername is unset — GitLab events can still be read, but nothing verifies they belong to the right account.')
+  }
+  if (cfg.sources?.github?.enabled && !cfg.identity?.githubUsername) {
+    warn('sources.github is enabled but identity.githubUsername is unset — the GitHub collector cannot run.')
+  }
+  if (cfg.sources?.jira?.enabled && !Object.keys(cfg.sources.jira.projectRouting || {}).length) {
+    warn('sources.jira.projectRouting is empty — every ticket routes to the default project regardless of its key.')
+  }
 }
 
 const git = run('git', ['--version'])
@@ -122,6 +172,12 @@ emit({
   ok: checks.every((c) => c.ok),
   configPath: configPath(),
   hasConfig: Boolean(cfg),
+  schemaVersion: SCHEMA_VERSION,
+  configVersion: cfg ? Number(cfg.version || 0) : null,
+  // True when the run will work but produce worse answers than it should.
+  // Report every warning to the user — that is the whole point of the field.
+  degraded: warnings.length > 0,
+  warnings,
   // False means the config cannot produce a valid log_time call. Collect and
   // propose anyway if you like, but do not offer to write until it's fixed.
   canWrite: Boolean(cfg) && checks.find((c) => c.name === 'config-values')?.ok === true,

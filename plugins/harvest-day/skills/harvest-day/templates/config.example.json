@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "ticketPattern": "[A-Z][A-Z0-9]{1,9}-\\d+",
   "identity": {
     "gitAuthors": ["you@example.com", "Your Name"],

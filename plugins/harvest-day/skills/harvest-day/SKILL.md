@@ -23,6 +23,11 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/doctor.mjs"
 - `canWrite: false` → the config can't produce a valid `log_time` call (usually
   an unfinished setup leaving `0` placeholders). Fix the listed
   `config-values` problems before Phase 7; don't discover it at the write.
+- `warnings[]` → **print every one, verbatim, before doing anything else.**
+  These are the settings that make the output quietly worse rather than
+  failing: a missing calibration, an unset note style, a config written against
+  an older schema. They are not "healthy checks" and are never suppressed by
+  the line budget below. Each one names its own fix; offer to run it.
 - Any failed check → report it in one line and continue with that source
   disabled. Only a dead Harvest MCP is fatal.
 - Verify the MCP sources yourself with one cheap call each, in parallel:
@@ -31,7 +36,10 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/doctor.mjs"
   only expose `authenticate`, tell the user to run `/mcp` and carry on without
   them.
 
-Preflight output to the user is at most three lines. Don't narrate healthy checks.
+Beyond the warnings, preflight output is at most three lines. Don't narrate
+healthy checks — but never trade a warning for brevity. Silent degradation is
+the failure mode this phase exists to prevent: output that looks fine is output
+nobody thinks to question.
 
 ## Phase 1 — setup (first run only)
 
@@ -135,7 +143,12 @@ Fri 2026-07-31  ·  evidence 5.75h  ·  fill 8h  ·  target 8h
 
 Already in Harvest for this date: none.
 Sources: git ✓  gitlab ✓  calendar ✓  jira ✓  granola ✗ (not authenticated)
+Estimates: uncalibrated — no historical bound (run setup to fix)
 ```
+
+The `Estimates:` line appears whenever doctor reported a calibration warning.
+The hours in the table are the thing that warning is about, so it belongs here
+as well as in preflight — omit it only when the calibration is present.
 
 - The header shows the real sum of each column. When fill can't reach target —
   meetings-only days, thin evidence — print the gap rather than the target:
