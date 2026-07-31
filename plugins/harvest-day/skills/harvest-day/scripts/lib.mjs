@@ -4,7 +4,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { extname, join } from 'node:path'
 
 export function configDir() {
   const base = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
@@ -27,6 +27,46 @@ export function writeConfig(cfg) {
   return configPath()
 }
 
+// Windows only: find what a bare command name actually refers to, the way the
+// shell would — walk PATH against PATHEXT. PATHEXT lists .EXE before .CMD, so
+// a real executable wins over a shim of the same name.
+//
+// Doing this ourselves is what lets us avoid `shell: true`. Node deprecated
+// passing an args array alongside it (DEP0190) because the arguments are
+// concatenated into a command line rather than escaped, and the deprecation is
+// right: routing through cmd.exe re-parses `&` and `|` out of argument values.
+const resolveCache = new Map()
+
+function resolveWindowsCommand(cmd) {
+  if (resolveCache.has(cmd)) return resolveCache.get(cmd)
+  let found = null
+  if (/[\\/]/.test(cmd)) {
+    found = existsSync(cmd) ? cmd : null
+  } else {
+    const exts = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
+    const dirs = (process.env.PATH || '').split(';').filter(Boolean)
+    search: for (const dir of dirs) {
+      for (const ext of exts) {
+        const candidate = join(dir, cmd + ext)
+        if (existsSync(candidate)) {
+          found = candidate
+          break search
+        }
+      }
+    }
+  }
+  resolveCache.set(cmd, found)
+  return found
+}
+
+function finish(r) {
+  if (r.error) return { ok: false, error: String(r.error.message).trim() }
+  const out = r.stdout || ''
+  const err = r.stderr || ''
+  if (r.status !== 0) return { ok: false, error: (err || out || `exit ${r.status}`).trim(), out, err }
+  return { ok: true, out, err }
+}
+
 // Run a command, capturing stdout and stderr separately. Never throws —
 // failures come back as { ok: false, error } so one broken repo or a logged-out
 // CLI can't abort a whole collection run.
@@ -35,17 +75,30 @@ export function writeConfig(cfg) {
 // their real output to stderr, so callers that only read stdout see nothing.
 export function run(cmd, args, opts = {}) {
   const base = { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts }
-  let r = spawnSync(cmd, args, base)
-  // Windows resolves some CLIs only through a shim (.cmd/.bat); retry via shell.
-  if (r.error?.code === 'ENOENT' && process.platform === 'win32' && !opts.shell) {
-    const quoted = args.map((a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a))
-    r = spawnSync(cmd, quoted, { ...base, shell: true })
+
+  if (process.platform !== 'win32') return finish(spawnSync(cmd, args, base))
+
+  const resolved = resolveWindowsCommand(cmd)
+  if (!resolved) return { ok: false, error: `${cmd} not found on PATH` }
+
+  // git, glab and gh are native binaries; spawning the resolved path directly
+  // means no shell, no command line to escape, and no deprecation.
+  const ext = extname(resolved).toLowerCase()
+  if (ext !== '.cmd' && ext !== '.bat') return finish(spawnSync(resolved, args, base))
+
+  // A batch shim (scoop, chocolatey) can only be started through cmd.exe.
+  // `/s` is load-bearing: without it cmd re-parses the arguments and a value
+  // containing `&` or `|` would execute. With it, arguments stay literal.
+  // The one thing /s cannot survive is a space in the program path, and every
+  // alternative quoting reintroduces the injection — so refuse instead, rather
+  // than run something unsafe.
+  if (/\s/.test(resolved)) {
+    return {
+      ok: false,
+      error: `${cmd} resolves to a batch shim inside a path containing spaces (${resolved}), which cannot be launched safely. Install the native executable, or move the shim somewhere without spaces.`,
+    }
   }
-  if (r.error) return { ok: false, error: String(r.error.message).trim() }
-  const out = r.stdout || ''
-  const err = r.stderr || ''
-  if (r.status !== 0) return { ok: false, error: (err || out || `exit ${r.status}`).trim(), out, err }
-  return { ok: true, out, err }
+  return finish(spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', resolved, ...args], base))
 }
 
 export function parseArgs(argv) {
