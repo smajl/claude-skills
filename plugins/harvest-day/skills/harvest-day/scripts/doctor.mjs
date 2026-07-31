@@ -6,14 +6,15 @@
 //   node doctor.mjs
 
 import { existsSync } from 'node:fs'
-import { configPath, findRepos, localToday, readConfig, resolveTimezone, run, emit } from './lib.mjs'
+import { DEFAULT_DAY_START_HOUR, configPath, findRepos, localToday, readConfig, resolveDayStartHour, resolveTimezone, run, emit } from './lib.mjs'
 
 // Bump whenever templates/config.example.json gains or drops a field. A config
 // written against an older schema is missing whatever was added since, and the
 // only symptom would otherwise be quietly worse output.
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 4
 
 const cfg = readConfig()
+const startHour = cfg ? resolveDayStartHour(cfg) : DEFAULT_DAY_START_HOUR
 const checks = []
 // Two tiers, deliberately. `problems` mean the config cannot produce a valid
 // log_time call and block the write. `warnings` mean the run still works but
@@ -108,9 +109,17 @@ if (cfg) {
     if (!Object.keys(cal.medianHoursByTask || {}).length) {
       warn('harvest.calibration.medianHoursByTask is empty — estimates have no historical bound, so nothing catches an over-scored cluster. Re-run setup to compute it from 90 days of entries.')
     } else if (cal.computedFrom) {
-      const age = Math.round((Date.parse(localToday(tz)) - Date.parse(cal.computedFrom)) / 86400000)
+      const age = Math.round((Date.parse(localToday(tz, startHour)) - Date.parse(cal.computedFrom)) / 86400000)
       if (age > 180) warn(`harvest.calibration was computed ${age} days ago — recompute it if the work has changed shape since.`)
     }
+  }
+
+  // An unusable value here doesn't break the write, it just quietly files
+  // late-night work on the wrong day — exactly the class of fault this tier
+  // exists to announce.
+  const configuredStart = cfg.rules?.dayStartHour
+  if (configuredStart !== undefined && configuredStart !== null && Number(configuredStart) !== startHour) {
+    warn(`rules.dayStartHour is ${JSON.stringify(configuredStart)}, which is not an integer 0–11 — falling back to ${startHour}:00, so work after midnight files under the previous day.`)
   }
 
   if (!(cfg.harvest?.targetHoursPerDay > 0)) {
@@ -194,6 +203,9 @@ emit({
   hasConfig: Boolean(cfg),
   schemaVersion: SCHEMA_VERSION,
   configVersion: cfg ? Number(cfg.version || 0) : null,
+  // The working-day boundary in effect. 3 means a day runs 03:00 to 03:00, so
+  // work just after midnight belongs to the evening before.
+  dayStartHour: startHour,
   // True when the run will work but produce worse answers than it should.
   // Report every warning to the user — that is the whole point of the field.
   degraded: warnings.length > 0,

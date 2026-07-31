@@ -28,7 +28,7 @@
 // else, so this collector is worth the setup.
 
 import { readFileSync } from 'node:fs'
-import { dayWindow, emit, fail, parseArgs, prune, readConfig, resolveTimezone } from './lib.mjs'
+import { dayWindow, emit, fail, parseArgs, prune, readConfig, resolveDayStartHour, resolveTimezone } from './lib.mjs'
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = args.config ? JSON.parse(readFileSync(args.config, 'utf8')) : readConfig()
@@ -46,7 +46,8 @@ const tz = args.tz ? String(args.tz) : resolveTimezone(cfg)
 // In probe mode there is no day to bound: we're hunting for any huddle at all,
 // so sweep back `probeDays` and report whatever the API actually returns.
 const probeDays = Number(args['probe-days'] || 90)
-const window = probe ? null : dayWindow(from, to, tz)
+const startHour = args['day-start-hour'] !== undefined ? Number(args['day-start-hour']) : resolveDayStartHour(cfg)
+const window = probe ? null : dayWindow(from, to, tz, startHour)
 
 // Stopping early once a request is in flight has to be done by unwinding, not
 // by process.exit(): killing the process while undici still holds a socket

@@ -18,10 +18,11 @@ emits it as `window`:
 ```json
 "window": {
   "tz": "Europe/Prague", "from": "2026-07-30", "to": "2026-07-30",
-  "since": "2026-07-30T00:00:00+02:00", "until": "2026-07-30T23:59:59+02:00",
-  "utcStart": "2026-07-29T22:00:00.000Z", "utcEnd": "2026-07-30T22:00:00.000Z",
-  "cqlStart": "2026-07-29 22:00", "cqlEnd": "2026-07-30 22:00",
-  "dstShift": null
+  "startHour": 3,
+  "since": "2026-07-30T03:00:00+02:00", "until": "2026-07-31T02:59:59+02:00",
+  "utcStart": "2026-07-30T01:00:00.000Z", "utcEnd": "2026-07-31T01:00:00.000Z",
+  "cqlStart": "2026-07-30 01:00", "cqlEnd": "2026-07-31 01:00",
+  "spillsPastMidnight": true, "dstShift": null
 }
 ```
 
@@ -29,9 +30,49 @@ Use these bounds for the MCP sources too, rather than deriving your own:
 `cqlStart` / `cqlEnd` for Confluence CQL, `utcStart` / `utcEnd` for anything
 that hands back ISO instants. `--tz` overrides the configured zone.
 
+### The day does not end at midnight
+
+Work does not stop politely at 00:00. A session that runs to half past midnight
+is part of the evening it continued from, and filing it on the next calendar
+date splits one stretch of work across two timesheet entries — one of which is
+a day the user hadn't started yet.
+
+So a day runs from `rules.dayStartHour` to the same hour the next morning.
+At the default of `3`, day D is `[D 03:00, D+1 03:00)`:
+
+| Worked at | Files under |
+|---|---|
+| Fri 09:00 | Friday |
+| Fri 23:30 | Friday |
+| Sat 00:30 | **Friday** |
+| Sat 02:59 | **Friday** |
+| Sat 03:01 | Saturday |
+
+**This shifts the boundary; it is not an overlap.** Both ends move together, so
+consecutive windows abut exactly and no instant belongs to two days. Extending
+day D to 03:00 while day D+1 still began at midnight would put the small hours
+in both, and bill them twice — the one error a timesheet must never make.
+
+The cost of the shift is its mirror image: genuine early-morning work before
+03:00 files under the previous day. At 3am that trade is nearly always right.
+Someone who really does start at 05:00 wants `dayStartHour` lower, and `0`
+restores literal midnight days.
+
+`--day-start-hour N` overrides it per run. An out-of-range value (anything but
+an integer 0–11) falls back to the default and doctor warns.
+
+`spillsPastMidnight` is set whenever `startHour > 0`, i.e. whenever `until`
+carries a later calendar date than `to`. When a proposal includes evidence from
+after midnight, say so in the footer — a commit timestamped 00:40 appearing
+under the previous day looks like a bug to anyone who doesn't know the rule.
+
 `dstShift` is non-null on the two days a year the offset changes, which are
-also the days that are 23 or 25 hours long. Worth a mention in the footer if
-the day's total looks odd.
+also the days that are 23 or 25 hours long. It is measured from the window's
+actual length rather than by comparing its endpoints' offsets, because a
+non-midnight boundary can land exactly on the transition — a 03:00 boundary in
+Europe/Prague does — leaving both endpoints on the same offset while the day
+between them is still 23 hours. Worth a mention in the footer if the day's
+total looks odd.
 
 ## git — `collect-git.mjs`
 

@@ -74,6 +74,9 @@ One consolidated round of questions. Everything has a detected default:
 4. Which optional sources to enable: GitLab, GitHub, Jira, Calendar, Granola, Slack
 5. Whether to track Slack huddles (see below — it needs one manual step)
 6. Timezone (default: system)
+7. `rules.dayStartHour` — only worth raising if they say something about their
+   hours. Default 3 means work up to 03:00 counts toward the previous day; 0
+   means literal midnight days. Don't interrogate anyone about this.
 
 ## 3b. The Slack huddle token
 

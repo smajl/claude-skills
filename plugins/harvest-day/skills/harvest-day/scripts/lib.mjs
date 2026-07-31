@@ -225,6 +225,29 @@ export function resolveTimezone(cfg) {
   )
 }
 
+// The hour at which one working day gives way to the next. Work at 00:30
+// belongs to the evening it continued from, not to the morning it technically
+// landed in, so the boundary sits at 03:00 rather than at midnight.
+//
+// This shifts the boundary; it does not overlap two days. Day D runs
+// [D 03:00, D+1 03:00) and day D+1 starts where it ends. An overlap — D
+// reaching into D+1 while D+1 still began at midnight — would put the small
+// hours in both windows and bill them twice, which is the one outcome a
+// timesheet must never produce.
+//
+// Set rules.dayStartHour to 0 for literal midnight days.
+export const DEFAULT_DAY_START_HOUR = 3
+
+export function resolveDayStartHour(cfg) {
+  const h = cfg?.rules?.dayStartHour
+  if (h === undefined || h === null) return DEFAULT_DAY_START_HOUR
+  const n = Number(h)
+  // Past midday it stops being "late night" and starts silently moving whole
+  // afternoons onto the wrong day, so refuse rather than honour it.
+  if (!Number.isInteger(n) || n < 0 || n > 11) return DEFAULT_DAY_START_HOUR
+  return n
+}
+
 // Minutes that `tz` is ahead of UTC at the given instant. Positive east.
 function offsetMinutesAt(tz, instant) {
   const parts = Object.fromEntries(
@@ -263,31 +286,63 @@ function offsetLabel(minutes) {
   return `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`
 }
 
+// An instant as an offset-bearing local ISO string — "2026-07-31T03:00:00+02:00".
+// Derived from the real offset at that instant rather than assembled from date
+// parts, so it stays correct across a DST boundary.
+function formatZoned(instant, tz) {
+  const off = offsetMinutesAt(tz, instant)
+  return new Date(instant.getTime() + off * 60000).toISOString().slice(0, 19) + offsetLabel(off)
+}
+
 // Everything a collector needs to bound an inclusive local day range.
 //
 //   since / until  offset-bearing ISO, for `git log` (unambiguous regardless
 //                  of what timezone the machine itself is in)
-//   utcStart       inclusive UTC instant of local midnight on `from`
-//   utcEnd         exclusive UTC instant of local midnight after `to`
+//   utcStart       inclusive UTC instant at which `from` begins
+//   utcEnd         exclusive UTC instant at which `to` ends
 //   cqlStart/End   the same bounds as Confluence CQL wants them, "YYYY-MM-DD
 //                  HH:mm" in UTC — CQL date bounds are UTC, not local
-export function dayWindow(from, to, tz) {
-  const start = zonedToUtc(from, '00:00:00', tz)
-  const end = zonedToUtc(dayAfter(to), '00:00:00', tz)
+//   startHour      the boundary in play; 3 means the day runs 03:00 to 03:00
+//   spillsPastMidnight  true when the window reaches into the next calendar
+//                  date, which is worth saying out loud in a proposal footer
+//
+// `startHour` shifts both ends together — see resolveDayStartHour. The two
+// ends must move as one: raising only the far end would overlap the next day
+// and count the small hours twice.
+export function dayWindow(from, to, tz, startHour = 0) {
+  const at = `${String(startHour).padStart(2, '0')}:00:00`
+  const start = zonedToUtc(from, at, tz)
+  const end = zonedToUtc(dayAfter(to), at, tz)
   const startOffset = offsetMinutesAt(tz, start)
-  const endOffset = offsetMinutesAt(tz, new Date(end.getTime() - 1))
+  const endOffset = offsetMinutesAt(tz, end)
   const cql = (d) => d.toISOString().slice(0, 16).replace('T', ' ')
+
+  // Detect the short and long days by measuring the window, not by comparing
+  // its two endpoints' offsets. A non-midnight boundary can land exactly on
+  // the transition — a 03:00 day boundary in Europe/Prague sits right at the
+  // spring-forward instant — leaving both endpoints on the same offset while
+  // the day between them is still only 23 hours long.
+  const nominalHours =
+    24 * Math.round((Date.parse(`${dayAfter(to)}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000)
+  const actualHours = (end.getTime() - start.getTime()) / 3600_000
   return {
     tz,
     from,
     to,
-    since: `${from}T00:00:00${offsetLabel(startOffset)}`,
-    until: `${to}T23:59:59${offsetLabel(endOffset)}`,
+    startHour,
+    since: formatZoned(start, tz),
+    // Inclusive: git's --until is, and one second short of the exclusive end
+    // is the last instant the day contains.
+    until: formatZoned(new Date(end.getTime() - 1000), tz),
     utcStart: start.toISOString(),
     utcEnd: end.toISOString(),
     cqlStart: cql(start),
     cqlEnd: cql(end),
-    dstShift: startOffset === endOffset ? null : `${offsetLabel(startOffset)} -> ${offsetLabel(endOffset)}`,
+    spillsPastMidnight: startHour > 0 || null,
+    dstShift:
+      actualHours === nominalHours
+        ? null
+        : `${offsetLabel(startOffset)} -> ${offsetLabel(endOffset)} (${actualHours}h, not ${nominalHours}h)`,
   }
 }
 
@@ -301,9 +356,13 @@ export function withinWindow(iso, window) {
   return t >= Date.parse(window.utcStart) && t < Date.parse(window.utcEnd)
 }
 
-// Today's date as the user's calendar shows it, not as UTC does.
-export function localToday(tz) {
+// Today's date as the user's calendar shows it, not as UTC does — and, with a
+// non-zero `startHour`, as their *working* day sees it. At 01:00 on the 1st
+// with the boundary at 03:00, the working day is still the 31st, so "log
+// today" reaches for the session the user is actually still in rather than
+// opening an empty new one.
+export function localToday(tz, startHour = 0) {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date())
+  }).format(new Date(Date.now() - startHour * 3600_000))
 }

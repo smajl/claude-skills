@@ -51,6 +51,11 @@ run the user actually asked for.
 
 - Explicit date, `today`, `yesterday`, `last friday`, `this week`, `last week`,
   or `2026-07-27..2026-07-31` — all accepted.
+- **A day runs from `rules.dayStartHour` (default 03:00) to the same hour next
+  morning**, not midnight to midnight, so work done just after midnight belongs
+  to the evening before. This also moves what `today` means: run at 01:00 and
+  `today` is still the previous calendar date, which is the session the user is
+  actually in. `references/collectors.md` has the table and the reasoning.
 - **No date given**: call Harvest `list_time_entries` with the user's
   `user_ids` and `limit: 500` for the last `rules.catchUpWindowDays` days, sum
   hours per day, and list workdays that are empty or under

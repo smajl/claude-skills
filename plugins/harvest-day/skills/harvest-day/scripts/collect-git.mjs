@@ -10,7 +10,7 @@
 
 import { basename } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
-import { dayWindow, findRepos, localToday, parseArgs, prune, readConfig, repoSlug, resolveTimezone, run, emit, fail, ticketKeys, withinWindow } from './lib.mjs'
+import { dayWindow, findRepos, localToday, parseArgs, prune, readConfig, repoSlug, resolveDayStartHour, resolveTimezone, run, emit, fail, ticketKeys, withinWindow } from './lib.mjs'
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = args.config ? JSON.parse(readFileSync(args.config, 'utf8')) : readConfig()
@@ -24,7 +24,8 @@ const full = Boolean(args.full)
 // commit object last took its current form. Only override deliberately.
 const dateBasis = args['date-basis'] === 'committer' ? 'committer' : 'author'
 const tz = args.tz ? String(args.tz) : resolveTimezone(cfg)
-const window = dayWindow(from, to, tz)
+const startHour = args['day-start-hour'] !== undefined ? Number(args['day-start-hour']) : resolveDayStartHour(cfg)
+const window = dayWindow(from, to, tz, startHour)
 const authors = cfg.identity?.gitAuthors || []
 if (!authors.length) fail('config.identity.gitAuthors is empty')
 
@@ -47,7 +48,7 @@ paths = paths.filter((p) => !exclude.has(basename(p)))
 const SEP = String.fromCharCode(31) // %x1f — between fields
 const REC = String.fromCharCode(2)  // %x02 — start of a commit record
 const EOM = String.fromCharCode(30) // %x1e — end of metadata, numstat follows
-const today = localToday(tz)
+const today = localToday(tz, startHour)
 
 // A squash merge is the one rewrite that genuinely destroys the authoring
 // date: the squashed commit is authored at squash time, and the originals

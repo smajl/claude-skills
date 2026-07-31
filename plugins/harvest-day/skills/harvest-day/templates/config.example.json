@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "ticketPattern": "[A-Z][A-Z0-9]{1,9}-\\d+",
   "identity": {
     "gitAuthors": ["you@example.com", "Your Name"],
@@ -58,6 +58,7 @@
     }
   },
   "rules": {
+    "dayStartHour": 3,
     "skipWeekends": true,
     "ignoreEventPatterns": ["ooo", "out of office", "holiday", "focus", "lunch", "blocked", "pto"],
     "catchUpWindowDays": 14

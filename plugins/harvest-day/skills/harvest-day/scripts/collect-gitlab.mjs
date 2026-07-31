@@ -6,7 +6,7 @@
 //   node collect-gitlab.mjs --from 2026-07-29 --to 2026-07-29 [--config path]
 
 import { readFileSync } from 'node:fs'
-import { dayAfter, dayBefore, dayWindow, parseArgs, prune, readConfig, resolveTimezone, run, emit, fail, ticketKeys, withinWindow } from './lib.mjs'
+import { dayAfter, dayBefore, dayWindow, parseArgs, prune, readConfig, resolveDayStartHour, resolveTimezone, run, emit, fail, ticketKeys, withinWindow } from './lib.mjs'
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = args.config ? JSON.parse(readFileSync(args.config, 'utf8')) : readConfig()
@@ -16,7 +16,8 @@ if (!args.from) fail('--from is required (YYYY-MM-DD)')
 const from = String(args.from)
 const to = String(args.to || args.from)
 const tz = args.tz ? String(args.tz) : resolveTimezone(cfg)
-const window = dayWindow(from, to, tz)
+const startHour = args['day-start-hour'] !== undefined ? Number(args['day-start-hour']) : resolveDayStartHour(cfg)
+const window = dayWindow(from, to, tz, startHour)
 const full = Boolean(args.full)
 const pattern = cfg.ticketPattern
 const host = cfg.sources?.gitlab?.host
