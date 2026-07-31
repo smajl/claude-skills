@@ -4,7 +4,7 @@
                          _  _
      ___ _ __ ___   __ _(_) |
     / __| '_ ` _ \ / _` | | |
-    \__ \ | | | | | (_| | | |      ( ^_^ )
+                 \__ \ | | | | | (_| | | |      ( ^_^ )
     |___/_| |_| |_|\__,_| |_|
          m a r k e t p l a c e
 ```
@@ -25,16 +25,17 @@ Reconstructs a workday from every trace it left, proposes Harvest time entries,
 and logs them **only after you confirm**.
 
 ```
-    git ─┐
- gitlab ─┤
-   jira ─┤     cluster        route to        estimate
- conflu ─┼──▶  by ticket ──▶  project ──▶  hours, twice ──┐
-    cal ─┤     & meeting      + task        (evidence·fill)
-granola ─┤                                                │
-  slack ─┘                                                ▼
-                                                   ┌─────────────┐
-              harvest ⏱ ◀── log ──  you review ✅  │  the table  │
-                                                   └─────────────┘
+   sources │  git · gitlab · jira · confluence · calendar · granola · slack
+           │
+   cluster │  group the evidence by ticket, meeting, MR or wiki page
+           │
+     route │  map each cluster to a Harvest project and task
+           │
+  estimate │  two hour columns — measured, and filled to target
+           │
+    review │  you edit the table; nothing is logged before this
+           │
+   harvest │  log the rows you confirmed
 ```
 
 | | |
