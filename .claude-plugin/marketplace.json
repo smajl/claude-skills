@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "jan-marketplace",
+  "name": "smajl-marketplace",
   "description": "Jan Pesa's personal Claude Code plugin marketplace — skills, agents, and commands shared across machines.",
   "owner": {
     "name": "Jan Pesa",
