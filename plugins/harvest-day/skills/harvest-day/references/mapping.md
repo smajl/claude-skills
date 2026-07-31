@@ -211,6 +211,12 @@ answer depends on which cluster you happen to size first.
 clusters proportional to evidence score, rounded to 0.25, with the largest
 cluster absorbing rounding drift so the day lands exactly on target.
 
+If the Slack ad-hoc absence check (`references/collectors.md`) found a stated
+absence for the day, use `targetHoursPerDay − absence hours` in place of
+`targetHoursPerDay` for this whole calculation — an afternoon shortened by a
+2h doctor's appointment should land the day at 6h, not be padded to 8 by
+over-filling the nearest work cluster.
+
 Three cases where that doesn't apply, all of them reachable:
 
 - **`remaining <= 0`** — a day of nothing but meetings. Fill == evidence. The

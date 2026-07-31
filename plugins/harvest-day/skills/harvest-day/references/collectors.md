@@ -287,11 +287,28 @@ calendar, propose it as an entry and say where it came from.
 
 ## Slack — messages
 
-Use only when a day is otherwise thin, or when the user asks. Search their own
-messages for the day across `sources.slack.channels`, or all work channels when
-that list is empty; a burst of substantive messages in a support or
-architecture channel is real work that leaves no other trace. Never quote
-private DM content into a Harvest note.
+Run this every day, not only when a day looks thin — it has caught real,
+otherwise-invisible work (a long design write-up, release troubleshooting, an
+onboarding conversation) even on days with strong git/calendar evidence, and it
+is the only source that can catch an ad-hoc absence (see below). Search the
+user's own messages for the day (`from:<@user_id>`, full day window) across
+`sources.slack.channels`, or all work channels when that list is empty; a burst
+of substantive messages in a support or architecture channel is real work that
+leaves no other trace. Never quote private DM content into a Harvest note.
+
+### Ad-hoc absence check
+
+Before computing fill hours, scan the same day's messages for a stated
+absence — "afk", "back in ~Nh", "doctor", "leaving early", "out for lunch
+meeting", and similar. Calendar OOO/holiday events and declined meetings are
+not the only way a day loses hours: a one-line "heads up, afk ~2h for a doctor's
+appointment" in a dev-chat channel is common and invisible to every other
+collector.
+
+When one is found, subtract the stated duration from that day's effective
+`targetHoursPerDay` before distributing fill — don't fill straight to the full
+target and then footnote the absence. An unstated or vague duration ("stepping
+out for a bit") is worth asking the user to confirm rather than guessing.
 
 ## Slack — huddles — `collect-slack.mjs`
 

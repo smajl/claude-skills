@@ -1,7 +1,7 @@
 {
   "name": "harvest-day",
   "description": "Reconstruct a workday from git, GitLab, Jira, calendar, Slack huddles and meeting notes, then log it to Harvest after you confirm.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "author": {
     "name": "Jan Peša",
     "email": "jan.pesa@gmail.com"
