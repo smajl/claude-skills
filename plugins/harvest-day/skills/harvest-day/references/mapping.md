@@ -41,6 +41,22 @@ missing.
 An attendee list dominated by external domains is a strong signal for
 recruiting or sales rather than product work.
 
+### Slack huddles
+
+A huddle rarely says what it was about — that is its nature, and the user has
+accepted it. **Default every huddle to the product project's meetings task**
+and don't strain to classify it. Two things legitimately override that:
+
+- The huddle carries a `title`, or names a ticket key in it — route on that
+  like any other cluster.
+- The people in `with` settle it: a huddle with a candidate is Recruiting, one
+  with the whole FE channel during an incident is maintenance.
+
+Note text is `huddle with <names>`, or `huddle with <names> — <title>` when
+there is one. Three or more participants read better as
+`huddle with Yusuf, Jakub +2`. Never reach into the surrounding DM to guess a
+subject: that is private message content, and the note rule below is absolute.
+
 ### Confluence doc review
 
 Route by what the document is about, not by the fact that it's a document:
@@ -99,6 +115,20 @@ on its own.
 
 Exact calendar duration, in both the evidence and fill columns. A 50-minute
 meeting is 50 minutes.
+
+A Slack huddle's `durationMinutes` is measured the same way and gets the same
+treatment — it is elapsed room time, not a booked slot, so if anything it is
+the more honest of the two. The one huddle that is *not* exact is one flagged
+`durationUnknown`: no end instant came back, so propose
+`sources.slack.huddles.fallbackHuddleHours` and say in the Why column that the
+figure is a default. Same for every huddle when the collector fell back to the
+MCP path — there, no duration is measured at all.
+
+**Don't count a huddle that overlaps a calendar meeting.** A scheduled call
+that happened to run in Slack produces both a calendar event and a huddle, and
+billing the two is billing the meeting twice. Keep the calendar event, drop the
+huddle, and mention the huddle in the Why column as confirmation the meeting
+actually took place.
 
 **Never apply a discount factor**, and never infer one from history — the user
 often gives a meeting less than its booked slot, but which meeting and by how

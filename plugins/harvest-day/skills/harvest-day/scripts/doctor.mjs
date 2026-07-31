@@ -11,7 +11,7 @@ import { configPath, findRepos, localToday, readConfig, resolveTimezone, run, em
 // Bump whenever templates/config.example.json gains or drops a field. A config
 // written against an older schema is missing whatever was added since, and the
 // only symptom would otherwise be quietly worse output.
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 
 const cfg = readConfig()
 const checks = []
@@ -127,6 +127,26 @@ if (cfg) {
   }
   if (cfg.sources?.jira?.enabled && !Object.keys(cfg.sources.jira.projectRouting || {}).length) {
     warn('sources.jira.projectRouting is empty — every ticket routes to the default project regardless of its key.')
+  }
+
+  // Huddles are ad-hoc meetings that reach no calendar, so a day full of them
+  // looks like a day of nothing. Without a token the collector degrades to
+  // reading start events through the MCP, which knows when a huddle began and
+  // not how long it ran — every duration becomes a guess. That is exactly the
+  // kind of quietly-worse output this tier exists to announce.
+  const huddles = cfg.sources?.slack?.huddles
+  if (cfg.sources?.slack?.enabled && huddles?.enabled !== false) {
+    const tokenEnv = huddles?.tokenEnv || cfg.sources.slack.tokenEnv
+    const inlineToken = huddles?.token || cfg.sources.slack.token
+    const hasToken = Boolean(process.env.HARVEST_DAY_SLACK_TOKEN || (tokenEnv && process.env[tokenEnv]) || inlineToken)
+    if (!hasToken) {
+      warn(
+        `no Slack user token found${tokenEnv ? ` in $${tokenEnv} or $HARVEST_DAY_SLACK_TOKEN` : ' in $HARVEST_DAY_SLACK_TOKEN'} — huddle durations and participants are unavailable, so huddles fall back to start-events read through the MCP and each one is proposed at the ${huddles?.fallbackHuddleHours ?? 0.5}h default. See references/setup.md to create one.`,
+      )
+    }
+    if (inlineToken) {
+      warn('a Slack token is stored in plain text inside config.json — move it to an environment variable and set sources.slack.huddles.tokenEnv to its name.')
+    }
   }
 }
 

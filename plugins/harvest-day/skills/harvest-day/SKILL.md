@@ -77,7 +77,8 @@ Run all of these in parallel for the day. Details and field meanings in
 | Jira | Atlassian MCP: JQL for issues you touched, plus `getJiraIssue` for titles of keys found elsewhere |
 | Confluence | Atlassian MCP CQL: comments you wrote and pages you edited. **CQL bounds are UTC** — use the `window.cqlStart` / `window.cqlEnd` the collectors emit, never a bare local date. Doc review shows up nowhere else |
 | Granola | search meeting notes for the day — use them for note *substance*, not for durations |
-| Slack | only when a day is thin on other evidence; look for your messages in work channels |
+| Slack huddles | `node .../collect-slack.mjs --from D --to D` — ad-hoc calls that reach no calendar. On `fallback: "mcp"`, use the MCP path in `references/collectors.md` |
+| Slack messages | only when a day is thin on other evidence; look for your messages in work channels |
 
 Never invent evidence. If a source is disabled, errors, or reports
 `truncated`, say so in the proposal's footer rather than silently producing a
@@ -88,7 +89,9 @@ thinner day.
 Group evidence into candidate entries. Rules in `references/mapping.md`.
 
 1. **Meetings** — one cluster per calendar event that the user accepted and
-   that isn't all-day, OOO, or declined.
+   that isn't all-day, OOO, or declined, plus one per Slack huddle. A huddle
+   overlapping a calendar event is the same meeting — the call moved to Slack —
+   so keep the calendar event and drop the huddle rather than billing both.
 2. **Ticket work** — one cluster per ticket key, mined from commit subjects,
    branch names, MR titles, review comments and Jira. Merge clusters sharing a key.
 3. **Untracked work** — evidence with no ticket key, grouped by repo. Local
@@ -112,7 +115,9 @@ would rather correct a flagged row than find a wrong one later.
 Produce two numbers per cluster and show both:
 
 Meeting hours are the true calendar duration in both columns and are never
-discounted automatically — the user trims them case by case at review.
+discounted automatically — the user trims them case by case at review. A
+huddle's measured duration counts as exact in the same way; only a huddle
+marked `durationUnknown` is an estimate, and it says so in its row.
 
 - **Evidence** — meetings at their true calendar duration; work clusters scored
   from evidence volume (commits, diff size, review comments, Jira transitions)
@@ -132,17 +137,19 @@ rounding and no timestamp timers, so log plain durations — never
 Show one table per day:
 
 ```
-Fri 2026-07-31  ·  evidence 5.75h  ·  fill 8h  ·  target 8h
+Fri 2026-07-31  ·  evidence 6h  ·  fill 8h  ·  target 8h
 
 #  Project  Task              Evid  Fill  Notes                                     Why
 1  HUME     Hume Meetings     0.25  0.25  Hume standup                              cal 09:00–09:15
 2  HUME     Hume Meetings     0.25  0.25  Leads Sync                                cal 09:15–09:30
 3  HUME     Maintenance-Core  3.00  4.50  HUME-5720 Select V2 — replacements, tests 6 commits, +412/-180, hume-web
 4  HUME     Feature - Core    1.00  1.50  review MR "HUME-8582 Replace BasicSelect" 4 diff notes + approval
-5  ?        ?                 0.75  1.00  Interview — candidate screen              cal 14:00–14:45  ← route?
+5  HUME     Hume Meetings     0.75  0.75  huddle with Yusuf                         slack 13:00–13:50, 2 segments
+6  ?        ?                 0.75  1.00  Interview — candidate screen              cal 14:00–14:45  ← route?
 
 Already in Harvest for this date: none.
 Sources: git ✓  gitlab ✓  calendar ✓  jira ✓  granola ✗ (not authenticated)
+         huddles ✓ (2, measured)
 Estimates: uncalibrated — no historical bound (run setup to fix)
 ```
 

@@ -244,10 +244,126 @@ to turn "Front-End Architecture" into "Front-End Architecture — agreed on Sele
 v2 rollout plan". If a Granola note exists for a meeting that isn't on the
 calendar, propose it as an entry and say where it came from.
 
-## Slack
+## Slack — messages
 
 Use only when a day is otherwise thin, or when the user asks. Search their own
 messages for the day across `sources.slack.channels`, or all work channels when
 that list is empty; a burst of substantive messages in a support or
 architecture channel is real work that leaves no other trace. Never quote
 private DM content into a Harvest note.
+
+## Slack — huddles — `collect-slack.mjs`
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/collect-slack.mjs" --from 2026-07-29 --to 2026-07-29
+```
+
+Huddles are the meetings no other source can see. They are started ad hoc, so
+they reach no calendar, produce no invite and leave no Granola note — and an
+afternoon of them looks, to every other collector here, like an afternoon of
+nothing. That makes them the second blind spot after Confluence, and unlike
+Confluence they can swallow hours at a time.
+
+Run this collector whenever `sources.slack.enabled` and
+`sources.slack.huddles.enabled` are both on. It needs a Slack **user** token
+(`xoxp-…`); `references/setup.md` covers creating one.
+
+Output is one entry per huddle:
+
+```json
+{
+  "start": "2026-07-29T11:00:00.000Z", "end": "2026-07-29T11:50:00.000Z",
+  "durationMinutes": 50, "with": ["Yusuf Sait Canbaz"],
+  "where": "Yusuf Sait Canbaz", "whereKind": "dm",
+  "segments": 2, "permalinkHint": "D06MUQK8WBB/1785322800.000100"
+}
+```
+
+| Field | What |
+|---|---|
+| `durationMinutes` | real elapsed time, from the room's own start and end instants |
+| `with` | everyone who joined at any point, the user excluded — this is the note text |
+| `where` / `whereKind` | the counterpart's name for a `dm`, `#channel` for a channel |
+| `title` | present only when the huddle was given a topic; usually absent |
+| `segments` | >1 when a rejoin was merged — see below |
+| `durationUnknown` | the huddle had no end instant; length is not available |
+| `attendanceUnverified` | no participant list came back, so attendance is assumed |
+
+### Durations here are exact — treat them like calendar durations
+
+`durationMinutes` is measured, not inferred. It belongs in both the evidence
+and the fill column at its true value, and it is never discounted
+automatically — same rule as calendar meetings in `mapping.md`. A huddle is the
+one ad-hoc thing in this pipeline you don't have to estimate.
+
+The exception is `durationUnknown`, which means Slack returned no end instant —
+a huddle still running, or an older record. Propose those at
+`sources.slack.huddles.fallbackHuddleHours` (0.5 by default), say in the Why
+column that the length is a default rather than a measurement, and let the user
+correct it.
+
+### Rejoins are one huddle, not three
+
+Leaving and rejoining starts a fresh room, so a single conversation routinely
+records two or three huddles minutes apart. The collector merges rooms in the
+same conversation separated by less than
+`sources.slack.huddles.coalesceGapMinutes` (10) and reports `segments: n`.
+
+`durationMinutes` then spans the whole merged range, gaps included, which is
+usually right — a call that paused is still a call. When `segments` is high and
+the span is long, that assumption is worth surfacing in the Why column.
+
+### Attendance
+
+A huddle in a channel that the user never joined is somebody else's meeting,
+and is dropped: the check is whether their id appears in the room's participant
+history. Huddles that come back with no participant list at all are kept and
+flagged `attendanceUnverified` rather than being guessed at in either direction.
+
+### What limits the sweep
+
+There is no "list my huddles" API, and **Slack search does not index huddle
+events at all** — verified: searching the exact string `"A huddle started"`
+returns nothing. So the only way to find them is to read conversation history,
+one call per conversation.
+
+The collector enumerates the user's conversations and reads each one across the
+whole `--from`/`--to` range in a single call, so a five-day catch-up costs the
+same as a single day. Two knobs bound it:
+
+- `maxConversations` (80) caps the sweep. Hitting the cap sets `truncated` and
+  a `truncatedNote` — **put it in the footer**, because a huddle that was never
+  looked for is indistinguishable from a day without huddles.
+- `conversations` pins an explicit list of conversation ids and skips discovery
+  entirely. For someone who huddles with the same four people, this is both
+  faster and complete.
+
+Individual conversations that can't be read land in `errors[]` and also set
+`truncated`; the sweep continues.
+
+A huddle that crosses local midnight is filed on the day it **started**, with
+its full duration.
+
+### Without a token — the degraded path
+
+When no token resolves, the collector emits
+`{"ok": false, "fallback": "mcp", …}` and exits 1. That is a specific
+instruction, not a generic failure: fall back to the Slack MCP, which can still
+find huddle *starts*.
+
+- Read each candidate conversation with `slack_read_channel`, bounded by
+  `window.utcStart` / `window.utcEnd`, and pick out Slackbot messages reading
+  `A huddle started`.
+- **Do not try to search for them.** The search tools cannot see these messages.
+  `read_channel` is the only route, which means you need a conversation list —
+  `sources.slack.huddles.conversations`, or the people the user is known to work
+  with.
+- You get a start timestamp and the conversation, and nothing else: no
+  duration, no participant list beyond who the DM is with. Propose each at
+  `fallbackHuddleHours` and mark the row so the user knows to correct it.
+- Coalesce starts less than `coalesceGapMinutes` apart, exactly as above —
+  rejoins produce several of these too.
+
+Say in the footer that huddles came from the fallback path. The difference
+between a measured 50 minutes and a defaulted 30 is precisely the sort of thing
+that should not be invisible in a timesheet.

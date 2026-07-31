@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "ticketPattern": "[A-Z][A-Z0-9]{1,9}-\\d+",
   "identity": {
     "gitAuthors": ["you@example.com", "Your Name"],
@@ -23,7 +23,19 @@
     "jira": { "enabled": true, "cloudId": "", "projectRouting": {} },
     "confluence": { "enabled": true, "cloudId": "", "includePageEdits": true },
     "granola": { "enabled": false },
-    "slack": { "enabled": false, "channels": [] }
+    "slack": {
+      "enabled": false,
+      "channels": [],
+      "huddles": {
+        "enabled": true,
+        "tokenEnv": "HARVEST_DAY_SLACK_TOKEN",
+        "conversations": [],
+        "conversationTypes": "im,mpim,private_channel,public_channel",
+        "maxConversations": 80,
+        "coalesceGapMinutes": 10,
+        "fallbackHuddleHours": 0.5
+      }
+    }
   },
   "harvest": {
     "defaultProjectId": 0,

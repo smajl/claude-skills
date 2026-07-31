@@ -72,7 +72,51 @@ One consolidated round of questions. Everything has a detected default:
 2. Default Harvest project, and any secondary projects to route to
 3. Target hours per day
 4. Which optional sources to enable: GitLab, GitHub, Jira, Calendar, Granola, Slack
-5. Timezone (default: system)
+5. Whether to track Slack huddles (see below — it needs one manual step)
+6. Timezone (default: system)
+
+## 3b. The Slack huddle token
+
+Only when the user enables huddles. Everything else in this skill authenticates
+through an MCP or a CLI that is already logged in; this one needs a token,
+because the huddle metadata — how long the call ran, who was in it — is not
+exposed by the Slack MCP at all. Without it huddles degrade to bare start
+times. Explain that trade-off and let the user decide; don't push.
+
+Walk them through it rather than pasting a link and hoping:
+
+1. <https://api.slack.com/apps> → **Create New App** → **From scratch**. Name it
+   anything (`harvest-day`), pick their workspace.
+2. **OAuth & Permissions** → *User* Token Scopes (the **User** column, not Bot —
+   a bot token cannot see their DMs, which is where most huddles happen). Add:
+   `users:read`, `channels:history`, `groups:history`, `im:history`,
+   `mpim:history`, `channels:read`, `groups:read`, `im:read`, `mpim:read`.
+   All read-only; the app can post nothing.
+3. **Install to Workspace**, then copy the **User** OAuth Token — it starts
+   `xoxp-`. If their workspace requires admin approval to install apps, this
+   step is where it will stop, and the fallback path is the answer.
+4. Put it in an environment variable, not in the config:
+
+   ```powershell
+   # PowerShell, persisted for this user
+   [Environment]::SetEnvironmentVariable('HARVEST_DAY_SLACK_TOKEN', 'xoxp-…', 'User')
+   ```
+
+   Set `sources.slack.huddles.tokenEnv` if they'd rather use a different
+   variable name. Doctor warns if a token ends up written into `config.json`.
+
+Then verify against their real workspace before trusting it:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/collect-slack.mjs" --probe
+```
+
+This sweeps 90 days for any huddle and dumps the raw payloads. Confirm that
+`room.date_start`, `room.date_end` and `room.participant_history` are present
+and populated. If `date_end` comes back `0` on huddles that have clearly ended,
+durations aren't available on that workspace and every huddle will report
+`durationUnknown` — worth knowing at setup rather than discovering it in a
+proposal.
 
 ## 4. Write
 
