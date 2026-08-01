@@ -58,9 +58,14 @@ run the user actually asked for.
   actually in. `references/collectors.md` has the table and the reasoning.
 - **No date given**: call Harvest `list_time_entries` with the user's
   `user_ids` and `limit: 500` for the last `rules.catchUpWindowDays` days, sum
-  hours per day, and list workdays that are empty or under
-  `harvest.targetHoursPerDay`. Ask which to fill. When `rules.skipWeekends`,
-  skip weekends unless the user logged time on one before.
+  hours per day, and list workdays that are empty or under that day's target
+  (Phase 5 — it is not one number). Ask which to fill.
+- **Weekends are not automatically absent.** `rules.skipWeekends` keeps them out
+  of the *default* catch-up list, but when `rules.weekendsWithEvidence` is on and
+  a weekend day has collector evidence, offer it anyway and say what was found.
+  Weekend work is real, it is usually a short evening stretch rather than a day,
+  and it is invisible to a rule that never looks. A weekend day offered this way
+  targets `calibration.dayTotals.weekend`, never the weekday figure.
 - That call is paginated. **A day looks empty both when nothing was logged and
   when the page ran out** — so if the response has `truncated: true`, follow
   `next_cursor` (same parameters, opaque token) before deciding anything is
@@ -89,6 +94,26 @@ Never invent evidence. If a source is disabled, errors, or reports
 `truncated`, say so in the proposal's footer rather than silently producing a
 thinner day.
 
+Then build the day's timeline. It runs git and GitLab itself; hand it everything
+that came from an MCP — Slack messages as points, calendar events as spans:
+
+```
+node .../build-timeline.mjs --from D --to D --events events.json
+```
+
+```json
+[ {"t": "2026-07-30T11:35:48+02:00", "kind": "slack", "label": "#hume-e2e-testing"},
+  {"start": "2026-07-30T09:00:00+02:00", "end": "2026-07-30T10:00:00+02:00",
+   "kind": "meeting", "label": "Hume standup"} ]
+```
+
+It returns `sessions[]`, `eveningSession`, `meetingOverlaps[]` and
+`afterMidnight[]`. **Use its answer rather than merging the collectors by
+hand** — three timestamp conventions across five sources is exactly the
+arithmetic that comes out differently on different runs. Supplying no `--events`
+is allowed and it says so in `notes`, but Slack is the densest source there is,
+so the timeline without it is much thinner than the day was.
+
 ## Phase 4 — cluster
 
 Group evidence into candidate entries. Rules in `references/mapping.md`.
@@ -115,6 +140,13 @@ internal management and company-wide meetings belong to Engineering (ENG).
 **When routing is genuinely ambiguous, mark the row `?` and ask** — the user
 would rather correct a flagged row than find a wrong one later.
 
+Finally, **collapse the work clusters to the shape the user actually logs.**
+The clustering above is deliberately fine-grained, because that is how you find
+everything; it is not how anyone writes a timesheet. Merge every work cluster
+sharing a project and task into one row, carrying the ticket keys into the note.
+Meetings are exempt — they are genuinely logged one per event. Full rule and the
+reasoning in `references/mapping.md`.
+
 ## Phase 5 — estimate hours, both ways
 
 Produce two numbers per cluster and show both:
@@ -130,42 +162,107 @@ marked `durationUnknown` is an estimate, and it says so in its row.
   user's median hours for that task. Scoring table and both constants are in
   `references/mapping.md` — use it rather than estimating freehand, so that the
   same evidence produces the same number twice. Days won't total the target.
-- **Fill** — meetings unchanged, then `targetHoursPerDay − meetings` distributed
-  across work clusters in proportion to their evidence weight.
+- **Fill** — meetings unchanged, then `target − meetings` distributed across
+  work clusters in proportion to their evidence weight.
 
 Round both to `harvest.roundToHours` (0.25 by default). The account has no
 rounding and no timestamp timers, so log plain durations — never
 `started_time`/`ended_time`.
+
+### The target is not one number
+
+`harvest.targetHoursPerDay` is the fallback, not the answer. Pick the day's
+target from `harvest.calibration.dayTotals`, which setup measures from the
+user's own entries:
+
+| Day | Target |
+|---|---|
+| Weekday | `dayTotals.weekday` |
+| Weekday with an evening session | `dayTotals.weekdayWithEveningSession` |
+| Saturday or Sunday | `dayTotals.weekend` |
+| Saturday or Sunday with an evening session | `dayTotals.weekendWithEveningSession` |
+
+The evening question applies to weekend days too. Weekend work is *usually* an
+evening, so the session is not what makes it unusual — but a weekend day that
+shows a real evening stretch still runs longer than one that shows a single
+push, and the two should not land on the same number.
+
+An **evening session** is timestamped evidence — commits, GitLab events, Slack
+messages — at or after `rules.eveningSessionHour` (19:00 by default), or before
+`rules.dayStartHour`. It is a real and frequent pattern: an evening picked up
+after dinner, covering for an afternoon errand or simply working late.
+`build-timeline.mjs` decides this; read `eveningSession` off its output rather
+than working it out from the collectors.
+
+The floor applies to **all** of the day's evening evidence taken together, not to
+each session separately — an evening interrupted by dinner is still an evening.
+
+**It must clear a floor: at least 3 events spanning at least 15 minutes**
+(`rules.eveningFloorEvents`, `rules.eveningFloorSpanMinutes`).
+Glancing at a pipeline before bed produces two messages a minute apart, and that
+is not an evening of work. The event count is what separates a glance from a
+session; the span is a weak secondary check, because a genuinely long evening can
+leave only a few minutes of trace at the very end of it. Without the floor the
+question fires on roughly half of all days and the user learns to dismiss it,
+which costs more than never asking. A burst below the floor is still worth one
+line in the Why column — it is evidence the day didn't end at 18:00 — it just
+doesn't move the target on its own.
+
+**Detect it, then ask — never silently raise the target.** Say what was found
+and what days like it usually came to:
+
+```
+Evening session detected: 21:43–23:00 (4 Slack messages, 2 pushes).
+Weekdays with an evening session usually total 9h rather than 8h.
+Use 9h for this day?  [y / n / other]
+```
+
+The timeline is good at spotting *that* a day ran long and bad at measuring *how
+long* — a stretch of evidence covers a fraction of the work it represents. So it
+opens the question and the user settles it. If they decline, fall back to the
+same day's no-session target — `dayTotals.weekend` on a Saturday or Sunday,
+`dayTotals.weekday` otherwise. Declining the raise must never move a weekend day
+onto a weekday figure.
+
+An absence found by the Slack check (`references/collectors.md`) subtracts from
+whichever target was chosen, and both adjustments can apply to the same day.
 
 ## Phase 6 — present and confirm
 
 Show one table per day:
 
 ```
-Fri 2026-07-31  ·  evidence 6h  ·  fill 8h  ·  target 8h
+Fri 2026-07-31  ·  evidence 6h  ·  fill 9h  ·  target 9h (weekday + evening session)
 
 #  Project  Task              Evid  Fill  Notes                                     Why
 1  HUME     Hume Meetings     0.25  0.25  Hume standup                              cal 09:00–09:15
 2  HUME     Hume Meetings     0.25  0.25  Leads Sync                                cal 09:15–09:30
-3  HUME     Maintenance-Core  3.00  4.50  HUME-5720 Select V2 — replacements, tests 6 commits, +412/-180, hume-web
-4  HUME     Feature - Core    1.00  1.50  review MR "HUME-8582 Replace BasicSelect" 4 diff notes + approval
-5  HUME     Hume Meetings     0.75  0.75  huddle with Yusuf                         slack 13:00–13:50, 2 segments
-6  ?        ?                 0.75  1.00  Interview — candidate screen              cal 14:00–14:45  ← route?
+3  HUME     Maintenance-Core  4.00  6.75  HUME-5720 Select V2 — replacements,       6 commits +412/-180 hume-web;
+                                          tests; also review of !5723               4 diff notes + approval (merged)
+4  HUME     Hume Meetings     0.75  0.75  huddle with Yusuf                         slack 13:00–13:50, 2 segments
+5  ?        ?                 0.75  1.00  Interview — candidate screen              cal 14:00–14:45  ← route?
 
+Evening session 21:10–22:40 (3 commits, 5 Slack messages) — target raised 8h → 9h.
 Already in Harvest for this date: none.
 Sources: git ✓  gitlab ✓  calendar ✓  jira ✓  granola ✗ (not authenticated)
          huddles ✓ (2, measured)
 Estimates: uncalibrated — no historical bound (run setup to fix)
 ```
 
+Row 3 is two clusters — the ticket work and the MR review both route to
+Maintenance-Core — merged per the collapse rule. The Why column keeps both
+sources visible so the merge stays checkable.
+
 The `Estimates:` line appears whenever doctor reported a calibration warning.
 The hours in the table are the thing that warning is about, so it belongs here
 as well as in preflight — omit it only when the calibration is present.
 
-- The header shows the real sum of each column. When fill can't reach target —
-  meetings-only days, thin evidence — print the gap rather than the target:
-  `evidence 2.5h · fill 2.5h · target 8h · 5.5h unaccounted`. Never print a
-  fill figure the rows don't add up to.
+- The header shows the real sum of each column, and names which target was
+  chosen and why — `target 9h (weekday + evening session)`, `target 2h
+  (weekend)`. A target that changed between days should never be silent.
+- When fill can't reach target — meetings-only days, thin evidence — print the
+  gap rather than the target: `evidence 2.5h · fill 2.5h · target 8h · 5.5h
+  unaccounted`. Never print a fill figure the rows don't add up to.
 - Always run `list_time_entries` for that date and user first, and show what's
   already there. If a proposed row duplicates an existing entry, mark it and
   default to skipping it.
@@ -203,3 +300,11 @@ scoring is systematically off, so nudge `harvest.calibration.hoursPerScore`
 one third of the way toward `hoursPerScore × ratio` and increment `samples`.
 Nudging rather than jumping keeps one unusual day from re-centring the model.
 Leave `medianHoursByTask` alone; setup recomputes it from real logged entries.
+
+When the user overrides the **day target** — declines the evening-session
+raise, or sets a weekend day to something other than `dayTotals.weekend` —
+don't touch the config on a single answer. Two of these in the same direction
+for the same day type is a pattern worth acting on: move that `dayTotals` entry
+one step (0.25h) toward what they chose, and say you did. These are measured
+medians rather than a fitted constant, so they should move slowly and visibly;
+a full recompute at the next setup run beats guessing from three corrections.
