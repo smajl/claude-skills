@@ -224,6 +224,14 @@ same day's no-session target — `dayTotals.weekend` on a Saturday or Sunday,
 `dayTotals.weekday` otherwise. Declining the raise must never move a weekend day
 onto a weekday figure.
 
+**The target can also be wrong in the other direction, and the evidence says
+so.** When the day's uncapped work evidence exceeds `target − meetings`, the
+figure came from a median and this day is an outlier. Flag every capped row and
+ask, exactly as above — `references/mapping.md` has the rule and the wording.
+Weekend days are where this bites: a 2h target clips a long Saturday, and
+without the flag the table's two columns agree, the rows sum to target, and
+nothing shows that hours are missing.
+
 An absence found by the Slack check (`references/collectors.md`) subtracts from
 whichever target was chosen, and both adjustments can apply to the same day.
 
@@ -263,6 +271,9 @@ as well as in preflight — omit it only when the calibration is present.
 - When fill can't reach target — meetings-only days, thin evidence — print the
   gap rather than the target: `evidence 2.5h · fill 2.5h · target 8h · 5.5h
   unaccounted`. Never print a fill figure the rows don't add up to.
+- When evidence *overshoots* the target, print that too, with the uncapped
+  figure: `evidence 6.75h (capped to 2h) · fill 2h · target 2h  ← target
+  may be low`. A day the rows agree on is not the same as a day that's right.
 - Always run `list_time_entries` for that date and user first, and show what's
   already there. If a proposed row duplicates an existing entry, mark it and
   default to skipping it.

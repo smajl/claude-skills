@@ -268,6 +268,33 @@ Cap any single work cluster at `dayTarget − Σ meeting hours`. The cap is that
 fixed bound, not "whatever is unallocated so far" — otherwise the answer
 depends on which cluster you happen to size first.
 
+**Never let the cap hide the fact that it fired.** Keep the uncapped figure,
+mark the row `← capped (N.NNh)`, and if the day's *uncapped* work evidence
+exceeds `dayTarget − Σ meeting hours`, say so under the table and offer to raise
+the target:
+
+```
+Evidence totals 6.75h against a 2h target — the target may be wrong for this day.
+Raise it to 6.75h?  [y / n / other]
+```
+
+A capped row is the only place the evidence column can disagree with the target,
+and that disagreement is information: `dayTotals` are medians, and a median is
+precisely the wrong thing to clip an outlier against. Silently clipping produces
+a table whose two columns agree, whose rows sum to target, and which is hours
+short — internally consistent and wrong, the one output shape this skill exists
+to avoid.
+
+This also restores the `← thin` check below. That flag compares fill against
+evidence, so clipping evidence down to the target makes fill and evidence agree
+by construction and the flag can never fire. Compare against the **uncapped**
+evidence.
+
+Same rule as everywhere else: detect, surface, ask. Don't raise the target on
+your own — a genuinely over-scored cluster (a lockfile churn, a vendored
+directory) looks identical at this point, and the user can tell the difference
+in a second.
+
 ### Work clusters — fill estimate
 
 `dayTarget` is chosen per day from `harvest.calibration.dayTotals` — weekday,
@@ -300,9 +327,12 @@ Three cases where that doesn't apply, all of them reachable:
   repo, Slack, or simply a day that wasn't 8 hours.
 - **`remaining` is large relative to the evidence** — one 1-commit cluster
   should not silently absorb 7 hours. When a cluster's fill exceeds `3 ×` its
-  evidence estimate, cap it there, leave the day short, and flag the row
-  `← thin`. A visible shortfall the user can correct beats a plausible-looking
-  number they can't check.
+  **uncapped** evidence estimate, cap it there, leave the day short, and flag the
+  row `← thin`. A visible shortfall the user can correct beats a
+  plausible-looking number they can't check. Compare against the uncapped figure:
+  a row already clipped by the target cap has, by construction, a fill equal to
+  its evidence, and comparing against the clipped value silently disables this
+  flag on exactly the days it is needed.
 
 In all three, the fill column is allowed to miss the target. The header shows
 the real sum, never the target dressed up as one.
