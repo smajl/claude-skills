@@ -171,6 +171,57 @@ because the evidence really is incomplete. `--max-pages N` fetches further.
 you whether a review was a rubber stamp or a real design argument. Size review
 entries from comment count and substance, not from the MR's diff size.
 
+## Timeline — `build-timeline.mjs`
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/build-timeline.mjs" \
+  --from 2026-07-30 --to 2026-07-30 --events events.json
+```
+
+Merges every timestamped source into one sorted stream and cuts it into
+sessions. It runs the git and GitLab collectors itself; anything that needs an
+MCP arrives through `--events`, so the script never needs a credential and
+behaves identically with or without a Slack token.
+
+`--events` takes a JSON array of two shapes:
+
+| Shape | Meaning |
+|---|---|
+| `{"t": "<iso>", "kind": "slack", "label": "#channel"}` | a point in time |
+| `{"start": "<iso>", "end": "<iso>", "kind": "meeting", "label": "…"}` | a span |
+
+Spans are meetings: exclusive ground truth, never sessionised, used to detect
+conflicts. Everything else is a point and feeds sessionisation.
+
+Output:
+
+| Field | What |
+|---|---|
+| `sessions[]` | start/end (ISO and local), minutes, event count, kind breakdown, `evening` |
+| `measuredHours` | total session time — a **floor** on the day, never the day |
+| `spanHours` | first event to last; a ceiling, and usually a generous one |
+| `eveningSession` | present only when the floor is cleared; this is what moves the target |
+| `eveningBelowFloor` | an evening burst too small to count — mention it, don't bill it |
+| `meetingOverlaps[]` | point events inside a meeting span — "possibly partial" |
+| `afterMidnight[]` | evidence past midnight, filed under the previous day |
+| `notes[]` | every source that was missing, truncated or untimed |
+
+Knobs: `--gap` (`rules.sessionGapMinutes`, 90), `--evening-hour`,
+`--floor-events`, `--floor-span`.
+
+### What it is and isn't for
+
+`measuredHours` is **not** the day's hours. Measured against 71 days of this
+user's real Harvest entries, session time recovers a median of ~23% of what they
+logged, and no lead-in constant fixes that — thinking, reading and debugging
+leave no events at all. Sizing stays with `mapping.md`; the target stays with the
+day-type figures in `SKILL.md` Phase 5.
+
+What the timeline is genuinely good at is **shape**: whether the day ran into the
+evening, whether a commit landed inside a meeting, whether work crossed midnight.
+Those are yes/no questions about structure, and it answers them the same way
+twice.
+
 ## GitHub — optional
 
 Off unless `sources.github.enabled`. Uses
@@ -305,8 +356,8 @@ not the only way a day loses hours: a one-line "heads up, afk ~2h for a doctor's
 appointment" in a dev-chat channel is common and invisible to every other
 collector.
 
-When one is found, subtract the stated duration from that day's effective
-`targetHoursPerDay` before distributing fill — don't fill straight to the full
+When one is found, subtract the stated duration from that day's target
+(`SKILL.md` Phase 5) before distributing fill — don't fill straight to the full
 target and then footnote the absence. An unstated or vague duration ("stepping
 out for a bit") is worth asking the user to confirm rather than guessing.
 

@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "ticketPattern": "[A-Z][A-Z0-9]{1,9}-\\d+",
   "identity": {
     "gitAuthors": ["you@example.com", "Your Name"],
@@ -53,6 +53,13 @@
     "calibration": {
       "hoursPerScore": 0.28,
       "medianHoursByTask": {},
+      "dayTotals": {
+        "weekday": null,
+        "weekdayWithEveningSession": null,
+        "weekend": null,
+        "weekendWithEveningSession": null
+      },
+      "medianWorkEntriesPerDay": null,
       "computedFrom": null,
       "samples": 0
     }
@@ -60,6 +67,11 @@
   "rules": {
     "dayStartHour": 3,
     "skipWeekends": true,
+    "weekendsWithEvidence": true,
+    "sessionGapMinutes": 90,
+    "eveningSessionHour": 19,
+    "eveningFloorEvents": 3,
+    "eveningFloorSpanMinutes": 15,
     "ignoreEventPatterns": ["ooo", "out of office", "holiday", "focus", "lunch", "blocked", "pto"],
     "catchUpWindowDays": 14
   }

@@ -91,9 +91,14 @@ delivery of commits the local collector already has, with a diffstat and an
 author date attached. Join them on `repos[].slug` from git against
 `pushes[].project` from GitLab — both are `group/project` — and then:
 
-- Slug matches a local repo → **git wins.** It has the diff volume and the
-  real authoring dates. The push contributes nothing to the score; at most it
-  confirms the work left the machine.
+- Slug matches a local repo **and git found commits for it in this window** →
+  **git wins.** It has the diff volume and the real authoring dates. The push
+  contributes nothing to the score; at most it confirms the work left the machine.
+- Slug matches a local repo but **git found no commits in the window** → the
+  commits were authored earlier and pushed today. Score the push under
+  "delivering older work" above. Without this the day reads as empty in a repo
+  the user demonstrably worked in, which is the failure the join was supposed to
+  prevent.
 - Slug has no local repo → the push is the *only* evidence, so it becomes its
   own cluster. This is the case the join exists to protect: a repo not cloned
   on this machine would otherwise vanish entirely. Score it from
@@ -108,6 +113,35 @@ the pushes that carried them.
 MR review activity is *not* covered by this rule — reviewing someone else's MR
 leaves no local commits, so `reviews[]` is independent evidence and is scored
 on its own.
+
+## Collapse to the shape the user logs
+
+Clustering is deliberately fine-grained: one per ticket, per repo, per reviewed
+MR, per commented page. That is how you avoid missing work. It is not how anyone
+fills in a timesheet, and a proposal that mirrors the clustering hands the user
+eight rows to check where they would have written one.
+
+So after routing and before estimating, **merge every work cluster that shares a
+project and task into a single row.** The ticket keys move into the note; the
+individual clusters survive only as the row's Why column and as the weights that
+split its hours.
+
+`harvest.calibration.medianWorkEntriesPerDay` says how many non-meeting entries
+the user actually writes on a normal day. Setup measures it. When the collapsed
+proposal still carries several times that many work rows, the clustering has
+split one piece of work — look for the join before presenting it.
+
+Three exceptions, all of which are separate rows even when the task matches:
+
+- **Meetings.** One per event, at true duration. They are already small and
+  already exact, and bundling them destroys the one column that isn't estimated.
+- **A cluster the user has separately corrected before**, via `learnedRoutes`.
+- **A row still marked `?`.** Never merge an unrouted cluster into a routed one;
+  that hides the question instead of asking it.
+
+Merging changes only presentation, never the total. If two clusters would have
+been 2.5h and 1.5h, the merged row is 4h — the sizing rules below still run per
+cluster, and the merge sums them afterwards.
 
 ## Estimation
 
@@ -152,11 +186,13 @@ against what the user actually logs.
 | Commits | `2 × √n` — sub-linear on purpose; 12 tiny commits ≠ 12× one commit |
 | Meaningful diff lines (excl. lockfiles, generated, vendored) | `lines ÷ 150`, cap 6 |
 | Distinct directories touched | `0.4` each, cap 3 — breadth implies context-switching |
+| Commits pushed with none authored today | `1 × √n`, cap 3 — see "delivering older work" |
 | MR opened | `1` — description, CI, cleanup |
 | MR merged | `0.5` — rebase, conflicts, watching the pipeline |
-| Review comments authored | `1.5 × √n × substance` |
-| Confluence comments on a page | `1.5 × √n × substance` |
+| Review comments authored | `1.5 × √n × substance`, cap 5 |
+| Confluence comments on a page | `0.8 × √n × substance`, cap 4 |
 | Confluence page authored / edited | `2`, only when the user is the last modifier |
+| Substantive Slack messages in work channels | `0.6 × √n × substance`, cap 3 |
 | Jira transition or comment | `0.5` each, cap 2 — small, but rescues no-commit days |
 | Branch touched, no commit | `0.5` — real work happened, it just didn't land |
 
@@ -164,6 +200,33 @@ against what the user actually logs.
 review, `1.5` for a threaded design argument. Judge it from the comment
 excerpts the collectors return — surfacing them is the whole reason they're
 there. A threaded design argument outweighs ten "👍" replies.
+
+**Comments are cheaper than code, and the points say so.** A Confluence comment
+is a few minutes of thought and typing; an MR is an afternoon. Scoring both at
+`1.5 × √n` lets a busy comment thread outweigh a day of shipped work — eleven
+comments on one page score more than two MRs opened, one merged and four commits
+pushed, which is simply wrong. Doc review is real and frequently invisible, so it
+keeps a generous coefficient and a floor, but it is capped where code work is
+not.
+
+**Slack messages score too**, and this is the only line that rescues a day spent
+in support, incident triage or design discussion. Count only substantive
+messages in work channels — a one-word reply, an emoji, `#gardening` and DM
+banter are not work. Never quote their content into a note; they are scored, not
+cited.
+
+### Delivering older work
+
+Attribution follows the author date, so commits written on Tuesday and pushed on
+Friday score on Tuesday. That is correct, and it leaves Friday looking empty even
+though Friday is when the branch was rebased, the MR written, the pipeline
+watched and the review answered.
+
+So when a repo has **pushes in the window but no commits authored in it**, score
+the pushed commits at `1 × √n` — half the rate of authored commits, because the
+writing was already billed and only the delivery belongs to today. This is the
+one case where a push whose slug matches a local repo still scores; the general
+rule below ("git wins") assumes git can see the work, and here it cannot.
 
 **Score no commit marked `dateUnreliable`.** That flag means a squash merge:
 its diff is the whole branch replayed, and every line of it was already scored
@@ -201,19 +264,26 @@ bound rather than as the estimate:
   whether it should merge into a neighbouring cluster.
 - No entry for that task id → no bound available, estimate as-is.
 
-Cap any single work cluster at `targetHoursPerDay − Σ meeting hours`. The cap
-is that fixed bound, not "whatever is unallocated so far" — otherwise the
-answer depends on which cluster you happen to size first.
+Cap any single work cluster at `dayTarget − Σ meeting hours`. The cap is that
+fixed bound, not "whatever is unallocated so far" — otherwise the answer
+depends on which cluster you happen to size first.
 
 ### Work clusters — fill estimate
 
-`remaining = targetHoursPerDay − Σ meeting hours`, distributed across work
-clusters proportional to evidence score, rounded to 0.25, with the largest
-cluster absorbing rounding drift so the day lands exactly on target.
+`dayTarget` is chosen per day from `harvest.calibration.dayTotals` — weekday,
+weekday-with-an-evening-session, or weekend — as set out in `SKILL.md` Phase 5.
+It is not `targetHoursPerDay`, which is only the fallback when calibration is
+missing. Using one figure for every day pads short weekend stretches into full
+days and clips long ones back to eight, and both errors look plausible in the
+table.
+
+`remaining = dayTarget − Σ meeting hours`, distributed across work clusters
+proportional to evidence score, rounded to 0.25, with the largest cluster
+absorbing rounding drift so the day lands exactly on target.
 
 If the Slack ad-hoc absence check (`references/collectors.md`) found a stated
-absence for the day, use `targetHoursPerDay − absence hours` in place of
-`targetHoursPerDay` for this whole calculation — an afternoon shortened by a
+absence for the day, use `dayTarget − absence hours` in place of `dayTarget`
+for this whole calculation — an afternoon shortened by a
 2h doctor's appointment should land the day at 6h, not be padded to 8 by
 over-filling the nearest work cluster.
 
@@ -248,6 +318,11 @@ rubber-stamp.
 - One line, ticket key first: `HUME-5720 Select V2 - remaining replacements, coding, reviews`.
 - Review entries name the MR: `review MR "HUME-8582 Replace BasicSelect in ActionInputParameterRow.vue"`.
 - Bundled meetings use a `- item` list inside one note.
+- A merged work row (see the collapse rule above) leads with the ticket that
+  carried the most evidence and names the rest after it:
+  `HUME-5720 Select V2 - remaining replacements; also HUME-8569 FormInput, review of !5723`.
+  Keep it one line. If the merged row genuinely covers several unrelated
+  tickets, a `- item` list is fine there too.
 - Prefer the Jira summary over a raw commit subject.
 - Never put a customer name, credential, or private DM content in a note.
 

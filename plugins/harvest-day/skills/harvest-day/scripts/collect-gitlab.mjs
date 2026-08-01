@@ -102,14 +102,22 @@ const summary = {
 }
 
 // Reviews are the easiest activity to under-log: surface them grouped by MR.
+//
+// `first` / `last` carry the group's instants, exactly as pushes[] does.
+// Without them a review is invisible to build-timeline.mjs, and reviewing is
+// precisely the activity that fills the gaps between commits — an approval
+// dropped from the clock can split one continuous stretch of work into two
+// sessions and lose the time between them.
 const reviewsByMr = {}
 for (const e of normalized) {
   if (!/commented|approved/i.test(e.action)) continue
   const key = e.title || e.url || 'unknown'
-  reviewsByMr[key] ??= { title: e.title, project: e.project, comments: 0, approved: false, tickets: e.tickets, excerpts: [] }
+  reviewsByMr[key] ??= { title: e.title, project: e.project, comments: 0, approved: false, tickets: e.tickets, excerpts: [], first: e.at, last: e.at }
   if (/approved/i.test(e.action)) reviewsByMr[key].approved = true
   else reviewsByMr[key].comments++
   if (e.noteExcerpt && reviewsByMr[key].excerpts.length < 3) reviewsByMr[key].excerpts.push(e.noteExcerpt)
+  if (e.at < reviewsByMr[key].first) reviewsByMr[key].first = e.at
+  if (e.at > reviewsByMr[key].last) reviewsByMr[key].last = e.at
 }
 
 // Pushes roll up by branch: ten pushes to one branch are one piece of work,

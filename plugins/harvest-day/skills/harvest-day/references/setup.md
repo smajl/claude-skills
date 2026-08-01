@@ -56,13 +56,37 @@ Derive and store:
   matching a standup/sync/1on1/retro/demo phrase → the meetings task
 - `harvest.noteStyle` — one sentence describing their phrasing, quoted back to
   them for confirmation
-- `harvest.targetHoursPerDay` — median of their non-zero day totals, rounded
+- `harvest.targetHoursPerDay` — median of their non-zero day totals, rounded.
+  This is now only the fallback; `dayTotals` below is what the fill column reads.
 - `harvest.calibration.medianHoursByTask` — `{ "<taskId>": <median hours per
   entry> }` across those 90 days, for every task with at least 3 entries. This
   is the only measured input the estimator has; without it the score→hours
   conversion has nothing to check itself against (see `mapping.md`). Set
   `computedFrom` to the date you computed it and leave `hoursPerScore` at its
   default — Phase 8 tunes that one from the user's corrections.
+- `harvest.calibration.dayTotals` — median day total, split three ways, because
+  one figure describes none of them well:
+  - `weekday` — median over Mon–Fri days with any time logged.
+  - `weekdayWithEveningSession` — median over the subset of those days that
+    carry timestamped evidence starting at or after `rules.eveningSessionHour`.
+    Compute it by running the git and GitLab collectors across the same 90 days
+    and checking each day's last session start. Expect it to come out one to two
+    hours above `weekday`; if the user has fewer than 5 such days, omit the
+    field rather than fitting a number to noise.
+  - `weekend` — median over Sat/Sun days with any time logged. Usually a short
+    evening, nothing like a weekday. Omit if they never log weekends.
+  - `weekendWithEveningSession` — the same split applied to weekend days. The
+    sample is always small, so if fewer than 3 weekend days carry an evening
+    session, omit it and let those days fall back to `weekend`.
+- `harvest.calibration.medianWorkEntriesPerDay` — median count of non-meeting
+  entries per logged day. This is frequently **1**: many people write one work
+  entry a day plus a handful of small meeting entries. The collapse rule in
+  `mapping.md` uses it to check whether a proposal has fragmented one piece of
+  work into several rows.
+
+These four are all measured from entries the user already wrote, so compute them
+in the same pass and don't ask about any of them. `targetHoursPerDay` is the
+only one worth confirming out loud, and only because it appears in step 3.
 
 ## 3. Ask
 

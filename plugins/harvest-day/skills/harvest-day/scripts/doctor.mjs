@@ -11,7 +11,7 @@ import { DEFAULT_DAY_START_HOUR, configPath, findRepos, localToday, readConfig, 
 // Bump whenever templates/config.example.json gains or drops a field. A config
 // written against an older schema is missing whatever was added since, and the
 // only symptom would otherwise be quietly worse output.
-const SCHEMA_VERSION = 4
+const SCHEMA_VERSION = 5
 
 const cfg = readConfig()
 const startHour = cfg ? resolveDayStartHour(cfg) : DEFAULT_DAY_START_HOUR
@@ -108,7 +108,18 @@ if (cfg) {
     }
     if (!Object.keys(cal.medianHoursByTask || {}).length) {
       warn('harvest.calibration.medianHoursByTask is empty — estimates have no historical bound, so nothing catches an over-scored cluster. Re-run setup to compute it from 90 days of entries.')
-    } else if (cal.computedFrom) {
+    }
+    // A single target for every day is wrong on any timesheet that has both
+    // long days and weekend work: the fill column pads a 2h Sunday to a full
+    // day, and clips a 10h Thursday back to eight. These are measured from the
+    // user's own entries, so their absence means the fill column is guessing.
+    if (!(cal.dayTotals?.weekday > 0)) {
+      warn('harvest.calibration.dayTotals is unset — every day fills to the same target, so long days get clipped and weekend days get padded. Re-run setup to measure it from 90 days of entries.')
+    }
+    if (!(cal.medianWorkEntriesPerDay > 0)) {
+      warn('harvest.calibration.medianWorkEntriesPerDay is unset — proposals are not collapsed to the shape the user actually logs, so expect more work rows than they would write themselves.')
+    }
+    if (cal.computedFrom) {
       const age = Math.round((Date.parse(localToday(tz, startHour)) - Date.parse(cal.computedFrom)) / 86400000)
       if (age > 180) warn(`harvest.calibration was computed ${age} days ago — recompute it if the work has changed shape since.`)
     }
