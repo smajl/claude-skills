@@ -341,11 +341,65 @@ calendar, propose it as an entry and say where it came from.
 Run this every day, not only when a day looks thin — it has caught real,
 otherwise-invisible work (a long design write-up, release troubleshooting, an
 onboarding conversation) even on days with strong git/calendar evidence, and it
-is the only source that can catch an ad-hoc absence (see below). Search the
-user's own messages for the day (`from:<@user_id>`, full day window) across
-`sources.slack.channels`, or all work channels when that list is empty; a burst
-of substantive messages in a support or architecture channel is real work that
-leaves no other trace. Never quote private DM content into a Harvest note.
+is the only source that can catch an ad-hoc absence (see below).
+
+It is also **the densest timestamped source there is**. Commits arrive a few
+times a day and cluster around merges; messages arrive throughout, which is what
+lets `build-timeline.mjs` describe the shape of a day rather than a handful of
+disconnected instants. On one measured day, git and GitLab alone produced 12
+minutes of sessions; the same day with messages produced 5.1 hours.
+
+### With a token — `collect-slack.mjs`
+
+The huddle sweep already reads every conversation's history, so messages cost
+nothing extra: the same call carries both. Output gains `messages[]` and an
+`events[]` array already shaped for `build-timeline.mjs`, so the whole payload
+can be passed straight through:
+
+```
+node .../collect-slack.mjs --from D --to D > slack.json
+node .../build-timeline.mjs --from D --to D --events slack.json
+```
+
+`--no-messages`, or `sources.slack.messages.enabled: false`, turns it off.
+
+| Field | What |
+|---|---|
+| `at` | the instant, for the timeline |
+| `where` / `whereKind` | `#channel`, or the counterpart's name for a DM |
+| `chars`, `threadReply` | shape, for the substance judgement in `mapping.md` |
+| `excerpt` | first 160 chars — **channels only**, never DMs |
+| `ignoredChannel` | matched `sources.slack.messages.ignoreChannels` |
+
+**DM text never leaves the collector.** A DM contributes its timing and its
+length and nothing else, because the note rule in `mapping.md` is absolute and
+the safest way to keep it is to never carry the text in the first place.
+
+`ignoreChannels` is a list of case-insensitive regexes matched against the
+channel name — `^#?gardening$` and friends. Matched messages stay in `messages[]`
+flagged rather than being dropped, so the count of what was excluded is visible;
+they are absent from `events[]`, because they are not work.
+
+### Without a token — the MCP path
+
+Messages, unlike huddles, are fully available through the Slack MCP. Search the
+user's own messages for the day and hand the results to `build-timeline.mjs`
+yourself:
+
+```
+slack_search_public_and_private
+  query: "from:<@USER_ID> on:2026-07-30"   sort: timestamp   limit: 20
+```
+
+Three things to know:
+
+- **It pages at 20.** A normal day runs to 20–40 messages, so follow the cursor
+  until `End of results` or the early part of the day is silently missing.
+- **Build the `--events` file by hand** — `{"t": "<iso>", "kind": "slack",
+  "label": "#channel"}` per message. Apply `ignoreChannels` yourself.
+- **It costs a call or two per day**, so a week-long catch-up is 10–15 calls
+  where the token path is one sweep. That is the real argument for the token,
+  more than the huddles.
 
 ### Ad-hoc absence check
 

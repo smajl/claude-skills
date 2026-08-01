@@ -11,7 +11,7 @@ import { DEFAULT_DAY_START_HOUR, configPath, findRepos, localToday, readConfig, 
 // Bump whenever templates/config.example.json gains or drops a field. A config
 // written against an older schema is missing whatever was added since, and the
 // only symptom would otherwise be quietly worse output.
-const SCHEMA_VERSION = 5
+const SCHEMA_VERSION = 6
 
 const cfg = readConfig()
 const startHour = cfg ? resolveDayStartHour(cfg) : DEFAULT_DAY_START_HOUR

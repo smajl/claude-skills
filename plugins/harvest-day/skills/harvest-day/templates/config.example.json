@@ -1,31 +1,69 @@
 {
-  "version": 5,
+  "version": 6,
   "ticketPattern": "[A-Z][A-Z0-9]{1,9}-\\d+",
   "identity": {
-    "gitAuthors": ["you@example.com", "Your Name"],
+    "gitAuthors": [
+      "you@example.com",
+      "Your Name"
+    ],
     "gitlabUsername": "yourhandle",
     "githubUsername": null,
     "harvestUserId": 0,
     "timezone": "Europe/Prague"
   },
   "repos": {
-    "roots": ["C:/dev"],
+    "roots": [
+      "C:/dev"
+    ],
     "depth": 2,
-    "include": ["product-web", "product-api"],
+    "include": [
+      "product-web",
+      "product-api"
+    ],
     "exclude": [],
     "projectByRepo": {}
   },
   "sources": {
-    "git": { "enabled": true },
-    "gitlab": { "enabled": true, "host": "gitlab.com" },
-    "github": { "enabled": false },
-    "calendar": { "enabled": true, "calendars": ["primary"] },
-    "jira": { "enabled": true, "cloudId": "", "projectRouting": {} },
-    "confluence": { "enabled": true, "cloudId": "", "includePageEdits": true },
-    "granola": { "enabled": false },
+    "git": {
+      "enabled": true
+    },
+    "gitlab": {
+      "enabled": true,
+      "host": "gitlab.com"
+    },
+    "github": {
+      "enabled": false
+    },
+    "calendar": {
+      "enabled": true,
+      "calendars": [
+        "primary"
+      ]
+    },
+    "jira": {
+      "enabled": true,
+      "cloudId": "",
+      "projectRouting": {}
+    },
+    "confluence": {
+      "enabled": true,
+      "cloudId": "",
+      "includePageEdits": true
+    },
+    "granola": {
+      "enabled": false
+    },
     "slack": {
       "enabled": false,
       "channels": [],
+      "messages": {
+        "enabled": true,
+        "ignoreChannels": [
+          "^#?random$",
+          "^#?social$",
+          "^#?watercooler$"
+        ]
+      },
       "huddles": {
         "enabled": true,
         "tokenEnv": "HARVEST_DAY_SLACK_TOKEN",
@@ -43,11 +81,32 @@
     "roundToHours": 0.25,
     "noteStyle": "Ticket key first, then a short lowercase summary of what was done.",
     "taskRules": [
-      { "match": "standup|sync|retro|grooming|demo|1on1|1-1|architecture", "taskId": 0, "taskName": "Meetings" },
-      { "match": "interview|candidate|hiring|screen", "projectId": 0, "taskId": 0, "taskName": "Recruiting" },
-      { "match": "training|learning|course|reading|doc review", "taskId": 0, "taskName": "Training & Learning" },
-      { "match": "fix|bug|refactor|maintenance|upgrade|chore", "taskId": 0, "taskName": "Maintenance" },
-      { "match": ".*", "taskId": 0, "taskName": "Feature" }
+      {
+        "match": "standup|sync|retro|grooming|demo|1on1|1-1|architecture",
+        "taskId": 0,
+        "taskName": "Meetings"
+      },
+      {
+        "match": "interview|candidate|hiring|screen",
+        "projectId": 0,
+        "taskId": 0,
+        "taskName": "Recruiting"
+      },
+      {
+        "match": "training|learning|course|reading|doc review",
+        "taskId": 0,
+        "taskName": "Training & Learning"
+      },
+      {
+        "match": "fix|bug|refactor|maintenance|upgrade|chore",
+        "taskId": 0,
+        "taskName": "Maintenance"
+      },
+      {
+        "match": ".*",
+        "taskId": 0,
+        "taskName": "Feature"
+      }
     ],
     "learnedRoutes": [],
     "calibration": {
@@ -72,7 +131,15 @@
     "eveningSessionHour": 19,
     "eveningFloorEvents": 3,
     "eveningFloorSpanMinutes": 15,
-    "ignoreEventPatterns": ["ooo", "out of office", "holiday", "focus", "lunch", "blocked", "pto"],
+    "ignoreEventPatterns": [
+      "ooo",
+      "out of office",
+      "holiday",
+      "focus",
+      "lunch",
+      "blocked",
+      "pto"
+    ],
     "catchUpWindowDays": 14
   }
 }

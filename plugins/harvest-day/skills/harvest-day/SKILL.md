@@ -87,8 +87,8 @@ Run all of these in parallel for the day. Details and field meanings in
 | Jira | Atlassian MCP: JQL for issues you touched, plus `getJiraIssue` for titles of keys found elsewhere |
 | Confluence | Atlassian MCP CQL: comments you wrote and pages you edited. **CQL bounds are UTC** — use the `window.cqlStart` / `window.cqlEnd` the collectors emit, never a bare local date. Doc review shows up nowhere else |
 | Granola | search meeting notes for the day — use them for note *substance*, not for durations |
-| Slack huddles | `node .../collect-slack.mjs --from D --to D` — ad-hoc calls that reach no calendar. On `fallback: "mcp"`, use the MCP path in `references/collectors.md` |
-| Slack messages | always — look for your messages in work channels, both for otherwise-invisible work and for a stated ad-hoc absence ("afk ~2h", "doctor", etc.) that should reduce the day's fill target |
+| Slack | `node .../collect-slack.mjs --from D --to D` — one sweep returns huddles (ad-hoc calls that reach no calendar) *and* messages, plus a ready-made `events[]` for the timeline. On `fallback: "mcp"` the huddles degrade and the messages must come from MCP search — both paths in `references/collectors.md` |
+| Slack messages | always, by either path — the densest timestamped source there is, and the only one that catches otherwise-invisible work or a stated ad-hoc absence ("afk ~2h", "doctor") that should reduce the day's target |
 
 Never invent evidence. If a source is disabled, errors, or reports
 `truncated`, say so in the proposal's footer rather than silently producing a
