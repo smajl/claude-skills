@@ -39,6 +39,9 @@ if (!args.from && !probe) fail('--from is required (YYYY-MM-DD)')
 
 const slackCfg = cfg.sources?.slack || {}
 const huddleCfg = slackCfg.huddles || {}
+const messageCfg = slackCfg.messages || {}
+const collectMessages = !args['no-messages'] && messageCfg.enabled !== false
+const isIgnoredChannel = ignoreMatcher(messageCfg.ignoreChannels)
 
 const from = String(args.from || '')
 const to = String(args.to || args.from || '')
@@ -132,6 +135,32 @@ const fromEpoch = (s) => (s ? new Date(Number(s) * 1000).toISOString() : null)
 // more than one value for `media_backend_type` over the years, so don't gate
 // on it — keep it in the output instead and let the caller see what came back.
 const isCall = (m) => Boolean(m && m.room) || m?.subtype === 'huddle_thread'
+
+// Joins, leaves, topic changes and bot posts are not work. A real message has
+// no subtype (or is a thread broadcast) and was typed by the user.
+const AUTHORED_SUBTYPES = new Set([undefined, null, '', 'thread_broadcast', 'me_message'])
+const isAuthored = (m, selfId) =>
+  Boolean(m)
+  && m.user === selfId
+  && !m.bot_id
+  && !isCall(m)
+  && AUTHORED_SUBTYPES.has(m.subtype)
+  && String(m.text || '').trim().length > 0
+
+// Channels the user says aren't work. Matched case-insensitively as regexes
+// against the channel name, the same rule every other `match` in this skill
+// uses. DMs are never excluded by name — they have no name to match — so a
+// chatty DM stays countable and it is the substance judgement that filters it.
+function ignoreMatcher(patterns) {
+  const res = (patterns || []).map((p) => {
+    try {
+      return new RegExp(p, 'i')
+    } catch {
+      return null
+    }
+  }).filter(Boolean)
+  return (name) => Boolean(name) && res.some((re) => re.test(name))
+}
 
 // Modest concurrency: enough to make a sweep of 80 conversations bearable,
 // low enough that the 429 path stays the exception.
@@ -244,10 +273,19 @@ async function main() {
     return messages
   }
 
-  const perConversation = await pool(conversations, 4, async (conv) => ({
-    conv,
-    calls: (await history(conv.id)).filter(isCall),
-  }))
+  // One sweep, two answers. The history call that finds huddles already carries
+  // every ordinary message in the conversation, so collecting the user's own
+  // messages costs nothing beyond the filtering — and messages are the densest
+  // timestamped evidence there is, dense enough to describe the shape of a day
+  // that commits alone cannot. Throwing them away here was the expensive part.
+  const perConversation = await pool(conversations, 4, async (conv) => {
+    const all = await history(conv.id)
+    return {
+      conv,
+      calls: all.filter(isCall),
+      authored: collectMessages ? all.filter((m) => isAuthored(m, selfId)) : [],
+    }
+  })
 
   // --- Probe mode --------------------------------------------------------
   //
@@ -380,6 +418,50 @@ async function main() {
   const withDuration = out.filter((h) => h.durationMinutes != null)
   const totalMinutes = withDuration.reduce((n, h) => n + h.durationMinutes, 0)
 
+  // --- Messages ----------------------------------------------------------
+
+  const messages = []
+  for (const { conv, authored } of perConversation) {
+    if (!authored.length) continue
+    const where = await describeConversation(conv, [])
+    const isDm = where.kind === 'dm' || where.kind === 'group-dm'
+    const ignored = isIgnoredChannel(where.name)
+    for (const m of authored) {
+      const text = String(m.text || '')
+      messages.push(prune({
+        at: fromEpoch(String(m.ts).split('.')[0]),
+        where: where.name,
+        whereKind: where.kind,
+        chars: text.length,
+        threadReply: m.thread_ts && m.thread_ts !== m.ts ? true : null,
+        // Excerpts are how the scorer tells a design argument from "👍", and
+        // mapping.md sizes messages on exactly that. But a DM's contents are
+        // never ours to repeat — the note rule is absolute — so DMs travel as
+        // shape only: when they were sent and how long they were.
+        excerpt: !isDm && !ignored ? text.slice(0, 160) : null,
+        // Kept rather than dropped: a silently shorter list is indistinguishable
+        // from a quiet day, and the count of what was excluded is cheap honesty.
+        ignoredChannel: ignored ? true : null,
+      }))
+    }
+  }
+  messages.sort((a, b) => String(a.at).localeCompare(String(b.at)))
+  const countedMessages = messages.filter((m) => !m.ignoredChannel)
+
+  // Shaped for build-timeline.mjs, so this whole payload can be handed to it
+  // as --events with no reshaping in between. Huddles are spans; messages are
+  // points. Ignored channels are absent — they are not work, and the timeline
+  // is about when work happened.
+  const events = [
+    ...out.map((h) => prune({
+      start: h.start,
+      end: h.end,
+      kind: 'huddle',
+      label: `huddle with ${(h.with || []).join(', ') || h.where}`,
+    })).filter((e) => e.start && e.end),
+    ...countedMessages.map((m) => ({ t: m.at, kind: 'slack', label: m.where })),
+  ]
+
   emit(
     prune({
       ok: true,
@@ -389,11 +471,15 @@ async function main() {
       window,
       self: selfId,
       huddles: out,
+      messages: collectMessages ? messages : null,
+      events,
       summary: {
         count: out.length,
         totalMinutes,
         totalHours: Math.round((totalMinutes / 60) * 100) / 100,
         unknownDuration: out.length - withDuration.length,
+        messages: collectMessages ? countedMessages.length : null,
+        messagesIgnored: collectMessages ? messages.length - countedMessages.length : null,
       },
       conversationsScanned: conversations.length,
       // Both of these mean the sweep did not see everything. Put them in the
