@@ -84,14 +84,36 @@ function pagedEvents(scope) {
 // project under the configured groups.
 const projects = []
 const errors = []
+const truncatedGroups = []
 for (const p of cfg.gitlab?.projects || []) projects.push({ ref: encodeURIComponent(p), label: p })
+
+// Page the listing, and say so loudly if the cap is ever reached. A group's
+// projects come back newest-first, so an unpaged single call keeps the 100
+// youngest repos and drops the oldest — which in a product group are the core
+// ones. Nothing downstream can tell that apart from a genuinely quiet month:
+// the sweep reports no errors, the numbers look plausible, and everyone whose
+// work lives in the oldest repo reads as having produced nothing.
+const maxGroupPages = Number(args['max-group-pages'] || cfg.gitlab?.maxGroupPages || 20)
 for (const g of cfg.gitlab?.groups || []) {
-  const r = api(`groups/${encodeURIComponent(g)}/projects?per_page=100&archived=false&include_subgroups=true`)
-  if (!r.ok) {
-    errors.push(`group ${g}: ${r.error}`)
-    continue
+  let capped = true
+  for (let page = 1; page <= maxGroupPages; page++) {
+    const r = api(`groups/${encodeURIComponent(g)}/projects?per_page=100&archived=false&include_subgroups=true&page=${page}`)
+    if (!r.ok) {
+      errors.push(`group ${g}: ${r.error}`)
+      capped = false
+      break
+    }
+    if (!Array.isArray(r.data) || r.data.length === 0) {
+      capped = false
+      break
+    }
+    for (const p of r.data) projects.push({ ref: String(p.id), label: p.path_with_namespace })
+    if (r.data.length < 100) {
+      capped = false
+      break
+    }
   }
-  for (const p of r.data) projects.push({ ref: String(p.id), label: p.path_with_namespace })
+  if (capped) truncatedGroups.push(g)
 }
 
 const byUser = {}
@@ -145,10 +167,31 @@ for (const p of projects) {
 // repo nobody listed — which is worth knowing, and worth trying to answer
 // before the scanner concludes they did nothing.
 const fallbackUsers = []
+
+// `/users/:id/events` accepts a username as well as an id, but only one without
+// a dot in it: `users/joseph.soukup/events` has the `.soukup` parsed off as a
+// format suffix and returns 404. That 404 is indistinguishable from a quiet
+// week unless you go looking, which is the exact failure this collector exists
+// to avoid — so resolve to the numeric id and let a bad handle say so plainly.
+function resolveUserId(username) {
+  const r = api(`users?username=${encodeURIComponent(username)}`)
+  if (!r.ok) return { ok: false, error: r.error }
+  const hit = (Array.isArray(r.data) ? r.data : []).find(
+    (u) => String(u.username).toLowerCase() === username.toLowerCase(),
+  )
+  if (!hit) return { ok: false, error: 'no such GitLab user — the roster handle is wrong, or the account was renamed' }
+  return { ok: true, id: hit.id }
+}
+
 if (!args['no-fallback']) {
   for (const m of cfg.team || []) {
     if (!m.gitlabUsername || byUser[m.gitlabUsername]) continue
-    const r = pagedEvents(`users/${encodeURIComponent(m.gitlabUsername)}`)
+    const resolved = resolveUserId(m.gitlabUsername)
+    if (!resolved.ok) {
+      errors.push(`user ${m.gitlabUsername}: ${resolved.error}`)
+      continue
+    }
+    const r = pagedEvents(`users/${resolved.id}`)
     if (!r.ok) {
       errors.push(`user ${m.gitlabUsername}: ${r.error}`)
       continue
@@ -168,6 +211,10 @@ const data = {
   // their own public feed" instead of treating it as equivalent evidence.
   fallbackUsers,
   truncatedProjects,
+  // A capped group listing means whole repositories were never looked at, which
+  // is a different and larger blind spot than a project whose event feed ran
+  // long — keep the two apart so the report can say which happened.
+  truncatedGroups,
   errors,
   byUser,
 }
@@ -195,6 +242,10 @@ function summarize(d) {
     perUser,
     fallbackUsers: d.fallbackUsers?.length ? d.fallbackUsers : null,
     truncatedProjects: d.truncatedProjects?.length ? d.truncatedProjects : null,
+    truncatedGroups: d.truncatedGroups?.length ? d.truncatedGroups : null,
+    warning: d.truncatedGroups?.length
+      ? `project listing hit the page cap for ${d.truncatedGroups.join(', ')} — repositories beyond it were never scanned, and anyone working only in those will look inactive. Raise gitlab.maxGroupPages.`
+      : undefined,
     errors: d.errors?.length ? d.errors : null,
   }
 }
