@@ -1,4 +1,4 @@
-// Shared helpers for the harvest-day collectors.
+// Shared helpers for the harvest-log collectors.
 // No dependencies — plain Node, works on Windows / macOS / Linux.
 
 import { spawnSync } from 'node:child_process'
@@ -8,6 +8,14 @@ import { extname, join } from 'node:path'
 
 export function configDir() {
   const base = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
+  return join(base, 'harvest-log')
+}
+
+// Where the config lived when this plugin was called harvest-day. Read-only:
+// nothing new is ever written here, but a config that predates the rename is
+// still a perfectly good config and shouldn't strand the user in setup again.
+export function legacyConfigDir() {
+  const base = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
   return join(base, 'harvest-day')
 }
 
@@ -15,8 +23,25 @@ export function configPath() {
   return join(configDir(), 'config.json')
 }
 
+export function legacyConfigPath() {
+  return join(legacyConfigDir(), 'config.json')
+}
+
+// The path actually in force: the current one if it exists, else the legacy one
+// if it does, else the current one (so "missing" reports the path setup will
+// write). doctor.mjs turns the legacy case into a warning with the move command.
+export function activeConfigPath() {
+  if (existsSync(configPath())) return configPath()
+  if (existsSync(legacyConfigPath())) return legacyConfigPath()
+  return configPath()
+}
+
+export function usingLegacyConfig() {
+  return !existsSync(configPath()) && existsSync(legacyConfigPath())
+}
+
 export function readConfig() {
-  const p = configPath()
+  const p = activeConfigPath()
   if (!existsSync(p)) return null
   return JSON.parse(readFileSync(p, 'utf8'))
 }
@@ -59,7 +84,7 @@ function resolveWindowsCommand(cmd) {
   return found
 }
 
-function finish(r) {
+function spawnResult(r) {
   if (r.error) return { ok: false, error: String(r.error.message).trim() }
   const out = r.stdout || ''
   const err = r.stderr || ''
@@ -76,7 +101,7 @@ function finish(r) {
 export function run(cmd, args, opts = {}) {
   const base = { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts }
 
-  if (process.platform !== 'win32') return finish(spawnSync(cmd, args, base))
+  if (process.platform !== 'win32') return spawnResult(spawnSync(cmd, args, base))
 
   const resolved = resolveWindowsCommand(cmd)
   if (!resolved) return { ok: false, error: `${cmd} not found on PATH` }
@@ -84,7 +109,7 @@ export function run(cmd, args, opts = {}) {
   // git, glab and gh are native binaries; spawning the resolved path directly
   // means no shell, no command line to escape, and no deprecation.
   const ext = extname(resolved).toLowerCase()
-  if (ext !== '.cmd' && ext !== '.bat') return finish(spawnSync(resolved, args, base))
+  if (ext !== '.cmd' && ext !== '.bat') return spawnResult(spawnSync(resolved, args, base))
 
   // A batch shim (scoop, chocolatey) can only be started through cmd.exe.
   // `/s` is load-bearing: without it cmd re-parses the arguments and a value
@@ -98,7 +123,7 @@ export function run(cmd, args, opts = {}) {
       error: `${cmd} resolves to a batch shim inside a path containing spaces (${resolved}), which cannot be launched safely. Install the native executable, or move the shim somewhere without spaces.`,
     }
   }
-  return finish(spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', resolved, ...args], base))
+  return spawnResult(spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', resolved, ...args], base))
 }
 
 export function parseArgs(argv) {
@@ -119,9 +144,9 @@ export function parseArgs(argv) {
 
 // Compact by default: the only consumer is a model, and indenting a few
 // hundred commits and events spends a large slice of the payload on
-// whitespace. Set HARVEST_DAY_PRETTY=1 when reading the output yourself.
+// whitespace. Set HARVEST_LOG_PRETTY=1 when reading the output yourself.
 export function emit(obj) {
-  const pretty = process.env.HARVEST_DAY_PRETTY === '1'
+  const pretty = process.env.HARVEST_LOG_PRETTY === '1' || process.env.HARVEST_DAY_PRETTY === '1'
   process.stdout.write(JSON.stringify(obj, null, pretty ? 2 : 0) + '\n')
 }
 
@@ -142,6 +167,22 @@ export function prune(obj) {
 export function fail(message) {
   emit({ ok: false, error: message })
   process.exit(1)
+}
+
+// Emit a final payload and set the exit status *without* calling process.exit.
+//
+// Use this in any script that has made an HTTP request. On Windows, calling
+// process.exit() while fetch's connection handles are still closing trips a
+// libuv assertion — the output is already written, but the process dies with a
+// panic and a garbage exit code, so a caller cannot tell success from failure.
+// Deferring the exit by a tick only makes it intermittent, which is worse.
+// Letting the loop drain instead costs about a third of a second and exits
+// cleanly, because the sockets are unref'd.
+//
+// It does not stop execution: return after calling it.
+export function finish(obj, code = 0) {
+  emit(obj)
+  process.exitCode = code
 }
 
 // Default key shape: HUME-1234, ENG-77. Overridable via config.ticketPattern.

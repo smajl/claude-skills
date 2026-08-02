@@ -17,7 +17,7 @@
 // A bot token will not do: it only sees huddles in conversations the bot was
 // invited to, which is none of the user's DMs.
 //
-// Resolution order for the token: --token, $HARVEST_DAY_SLACK_TOKEN, the env
+// Resolution order for the token: --token, $HARVEST_LOG_SLACK_TOKEN, the env
 // var named by sources.slack.tokenEnv, then sources.slack.token. Prefer one of
 // the env forms — a token in config.json is a token in a file that gets copied
 // around.
@@ -32,7 +32,7 @@ import { dayWindow, emit, fail, parseArgs, prune, readConfig, resolveDayStartHou
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = args.config ? JSON.parse(readFileSync(args.config, 'utf8')) : readConfig()
-if (!cfg) fail('No config found. Run the harvest-day setup first.')
+if (!cfg) fail('No config found. Run the harvest-log setup first.')
 
 const probe = Boolean(args.probe)
 if (!args.from && !probe) fail('--from is required (YYYY-MM-DD)')
@@ -76,12 +76,16 @@ const apiErrors = []
 
 // Overridable so the normalization and coalescing can be tested against a
 // fake Slack rather than only in production.
-const apiBase = process.env.HARVEST_DAY_SLACK_API_BASE || 'https://slack.com/api'
+const apiBase = process.env.HARVEST_LOG_SLACK_API_BASE || process.env.HARVEST_DAY_SLACK_API_BASE || 'https://slack.com/api'
 
 // Settings live under sources.slack.huddles; sources.slack is still consulted
 // so a config that put them one level up keeps working.
 function resolveToken() {
   if (typeof args.token === 'string') return args.token
+  // HARVEST_DAY_SLACK_TOKEN is what this variable was called before the plugin
+  // was renamed. Still honoured: the token lives in the user's environment, not
+  // in this repo, and a rename here shouldn't silently degrade their huddles.
+  if (process.env.HARVEST_LOG_SLACK_TOKEN) return process.env.HARVEST_LOG_SLACK_TOKEN
   if (process.env.HARVEST_DAY_SLACK_TOKEN) return process.env.HARVEST_DAY_SLACK_TOKEN
   for (const name of [huddleCfg.tokenEnv, slackCfg.tokenEnv]) {
     if (name && process.env[name]) return process.env[name]
@@ -187,7 +191,7 @@ async function main() {
       source: 'slack',
       error: 'no Slack user token configured',
       fallback: 'mcp',
-      hint: 'set $HARVEST_DAY_SLACK_TOKEN to an xoxp- token, or sources.slack.tokenEnv to the name of the variable holding it',
+      hint: 'set $HARVEST_LOG_SLACK_TOKEN to an xoxp- token, or sources.slack.tokenEnv to the name of the variable holding it',
     })
   }
 

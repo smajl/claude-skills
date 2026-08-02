@@ -77,7 +77,7 @@ total looks odd.
 ## git — `collect-git.mjs`
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/collect-git.mjs" --from 2026-07-29 --to 2026-07-29
+node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-log/scripts/collect-git.mjs" --from 2026-07-29 --to 2026-07-29
 ```
 
 Per repo: `commits[]` (sha, author `date`, subject, insertions, deletions,
@@ -140,7 +140,7 @@ Interpreting the rest:
 ## GitLab — `collect-gitlab.mjs`
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/collect-gitlab.mjs" --from 2026-07-29 --to 2026-07-29
+node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-log/scripts/collect-gitlab.mjs" --from 2026-07-29 --to 2026-07-29
 ```
 
 Wraps `glab api events`, rolled up into the four shapes that map onto billable
@@ -174,7 +174,7 @@ entries from comment count and substance, not from the MR's diff size.
 ## Timeline — `build-timeline.mjs`
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/build-timeline.mjs" \
+node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-log/scripts/build-timeline.mjs" \
   --from 2026-07-30 --to 2026-07-30 --events events.json
 ```
 
@@ -418,7 +418,7 @@ out for a bit") is worth asking the user to confirm rather than guessing.
 ## Slack — huddles — `collect-slack.mjs`
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/collect-slack.mjs" --from 2026-07-29 --to 2026-07-29
+node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-log/scripts/collect-slack.mjs" --from 2026-07-29 --to 2026-07-29
 ```
 
 Huddles are the meetings no other source can see. They are started ad hoc, so

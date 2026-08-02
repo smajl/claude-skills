@@ -1,17 +1,18 @@
 #!/usr/bin/env node
-// Preflight for harvest-day: is there a config, and do the local CLIs work?
+// Preflight for harvest-log: is there a config, and do the local CLIs work?
 // MCP servers (Harvest, Calendar, Jira, Granola, Slack) can't be probed from a
 // script — the skill checks those itself by calling a cheap tool on each.
 //
 //   node doctor.mjs
 
 import { existsSync } from 'node:fs'
-import { DEFAULT_DAY_START_HOUR, configPath, findRepos, localToday, readConfig, resolveDayStartHour, resolveTimezone, run, emit } from './lib.mjs'
+import { credentials, get, hasCredentials } from './harvest-api.mjs'
+import { DEFAULT_DAY_START_HOUR, activeConfigPath, configDir, configPath, findRepos, legacyConfigDir, legacyConfigPath, localToday, readConfig, resolveDayStartHour, resolveTimezone, run, emit, usingLegacyConfig } from './lib.mjs'
 
 // Bump whenever templates/config.example.json gains or drops a field. A config
 // written against an older schema is missing whatever was added since, and the
 // only symptom would otherwise be quietly worse output.
-const SCHEMA_VERSION = 6
+const SCHEMA_VERSION = 7
 
 const cfg = readConfig()
 const startHour = cfg ? resolveDayStartHour(cfg) : DEFAULT_DAY_START_HOUR
@@ -24,11 +25,23 @@ const checks = []
 const warnings = []
 const warn = (m) => warnings.push(m)
 
+const legacy = usingLegacyConfig()
+
 checks.push({
   name: 'config',
   ok: Boolean(cfg),
-  detail: cfg ? configPath() : `missing at ${configPath()} — run setup`,
+  detail: cfg ? activeConfigPath() : `missing at ${configPath()} — run setup`,
 })
+
+// The plugin used to be called harvest-day, and its config lived under that
+// name. Reading the old path keeps a renamed install working, but leaving it
+// there means the next machine — or the next reader of the docs — looks in the
+// wrong place, so say it once and offer the one-line move.
+if (legacy) {
+  warn(
+    `config is still at the pre-rename path ${legacyConfigPath()}. It is being read from there, but move the directory: \`mv "${legacyConfigDir()}" "${configDir()}"\` (the name is all that changed).`,
+  )
+}
 
 // The template ships id placeholders of 0, and Harvest's log_time requires
 // project_id and task_id >= 1. Without this check a half-finished setup sails
@@ -158,16 +171,50 @@ if (cfg) {
   if (cfg.sources?.slack?.enabled && huddles?.enabled !== false) {
     const tokenEnv = huddles?.tokenEnv || cfg.sources.slack.tokenEnv
     const inlineToken = huddles?.token || cfg.sources.slack.token
-    const hasToken = Boolean(process.env.HARVEST_DAY_SLACK_TOKEN || (tokenEnv && process.env[tokenEnv]) || inlineToken)
+    const hasToken = Boolean(
+      process.env.HARVEST_LOG_SLACK_TOKEN || process.env.HARVEST_DAY_SLACK_TOKEN || (tokenEnv && process.env[tokenEnv]) || inlineToken,
+    )
     if (!hasToken) {
       warn(
-        `no Slack user token found${tokenEnv ? ` in $${tokenEnv} or $HARVEST_DAY_SLACK_TOKEN` : ' in $HARVEST_DAY_SLACK_TOKEN'} — huddle durations and participants are unavailable, so huddles fall back to start-events read through the MCP and each one is proposed at the ${huddles?.fallbackHuddleHours ?? 0.5}h default. See references/setup.md to create one.`,
+        `no Slack user token found${tokenEnv ? ` in $${tokenEnv} or $HARVEST_LOG_SLACK_TOKEN` : ' in $HARVEST_LOG_SLACK_TOKEN'} — huddle durations and participants are unavailable, so huddles fall back to start-events read through the MCP and each one is proposed at the ${huddles?.fallbackHuddleHours ?? 0.5}h default. See references/setup.md to create one.`,
       )
     }
     if (inlineToken) {
       warn('a Slack token is stored in plain text inside config.json — move it to an environment variable and set sources.slack.huddles.tokenEnv to its name.')
     }
   }
+}
+
+// --- Harvest REST -------------------------------------------------------
+//
+// The API is the preferred path and the MCP is the fallback, because the
+// difference is measured in context: setup reads 90 days of entries and the
+// catch-up scan two weeks, and through the MCP every one of those entries
+// arrives in the conversation. Both paths work; only one of them is cheap.
+let harvestApi = false
+if (hasCredentials(cfg)) {
+  const creds = credentials(cfg)
+  const me = await get('/users/me', creds)
+  harvestApi = me.ok
+  checks.push({
+    name: 'harvest-api',
+    ok: me.ok,
+    detail: me.ok
+      ? `authenticated as ${me.data.email} (user ${me.data.id}) via $${creds.tokenEnv}`
+      : `${me.error} — fix the token or unset $${creds.tokenEnv} to fall back to the MCP`,
+  })
+  // A token belonging to one person and a config naming another produces
+  // entries logged against the wrong user, silently and irreversibly.
+  if (me.ok && cfg?.identity?.harvestUserId && me.data.id !== cfg.identity.harvestUserId) {
+    warn(
+      `identity.harvestUserId is ${cfg.identity.harvestUserId} but the API token belongs to user ${me.data.id} (${me.data.email}). Entries would be written against whichever the write path uses — re-run setup so they agree.`,
+    )
+  }
+} else if (cfg) {
+  const creds = credentials(cfg)
+  warn(
+    `no Harvest personal access token found in $${creds.tokenEnv} / $${creds.accountEnv} — falling back to the Harvest MCP. That works, but setup and the catch-up scan then read every entry into the conversation instead of a summary. See references/setup.md step 0 to create one.`,
+  )
 }
 
 const git = run('git', ['--version'])
@@ -210,7 +257,8 @@ if (cfg) {
 
 emit({
   ok: checks.every((c) => c.ok),
-  configPath: configPath(),
+  configPath: activeConfigPath(),
+  legacyConfigPath: legacy ? legacyConfigPath() : null,
   hasConfig: Boolean(cfg),
   schemaVersion: SCHEMA_VERSION,
   configVersion: cfg ? Number(cfg.version || 0) : null,
@@ -224,6 +272,11 @@ emit({
   // False means the config cannot produce a valid log_time call. Collect and
   // propose anyway if you like, but do not offer to write until it's fixed.
   canWrite: Boolean(cfg) && checks.find((c) => c.name === 'config-values')?.ok === true,
+  // True when the REST path is live. False is not a failure — it means every
+  // Harvest read goes through the MCP and costs context.
+  harvestApi,
   checks,
-  mcpToVerify: ['harvest', 'google-calendar', 'atlassian(jira)', 'granola', 'slack'],
+  // The Harvest MCP is only needed when harvestApi is false, plus for
+  // submit_timesheet, which has no REST equivalent.
+  mcpToVerify: [harvestApi ? null : 'harvest', 'google-calendar', 'atlassian(jira)', 'granola', 'slack'].filter(Boolean),
 })

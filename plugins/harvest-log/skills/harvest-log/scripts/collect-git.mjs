@@ -14,7 +14,7 @@ import { dayWindow, findRepos, localToday, parseArgs, prune, readConfig, repoSlu
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = args.config ? JSON.parse(readFileSync(args.config, 'utf8')) : readConfig()
-if (!cfg) fail('No config found. Run the harvest-day setup first.')
+if (!cfg) fail('No config found. Run the harvest-log setup first.')
 if (!args.from) fail('--from is required (YYYY-MM-DD)')
 
 const from = String(args.from)

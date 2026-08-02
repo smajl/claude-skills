@@ -1,5 +1,5 @@
 ---
-name: harvest-day
+name: harvest-log
 description: Reconstruct what the user worked on from git, GitLab, Jira, Google Calendar, Granola and Slack, then propose and log Harvest time entries. Use when the user wants to fill in, catch up on, or check their Harvest timesheet ("log my day", "fill my harvest", "what did I do on Tuesday", "catch up my timesheet", "/harvest").
 ---
 
@@ -9,14 +9,38 @@ Turn a day's scattered evidence into Harvest time entries. **Never write to
 Harvest without explicit confirmation** — the whole point is that the user
 reviews a proposal first.
 
-Scripts referenced below live in `${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/`.
-Run them with `node`. Config lives at `~/.claude/harvest-day/config.json`
-(`$CLAUDE_CONFIG_DIR/harvest-day/config.json` if that variable is set).
+Scripts referenced below live in `${CLAUDE_PLUGIN_ROOT}/skills/harvest-log/scripts/`.
+Run them with `node`. Config lives at `~/.claude/harvest-log/config.json`
+(`$CLAUDE_CONFIG_DIR/harvest-log/config.json` if that variable is set). This
+skill was called `harvest-day` until v0.7.0; a config still sitting at
+`~/.claude/harvest-day/config.json` is read from there and doctor says so.
+
+## Harvest: API first, MCP as fallback
+
+Every Harvest read has two paths, and they differ by an order of magnitude in
+context. Prefer the scripts:
+
+| Need | Script (preferred) | MCP fallback |
+|---|---|---|
+| Identity, account settings, projects, tasks | `harvest-meta.mjs` | `get_account_settings`, `list_projects`, `list_project_assignments` |
+| What's already logged for a day | `harvest-entries.mjs --from D --to D` | `list_time_entries` |
+| Which recent days are thin | `harvest-entries.mjs --catch-up` | `list_time_entries` + arithmetic |
+| Setup's medians and note patterns | `harvest-entries.mjs --calibrate` | 90 days of `list_time_entries` |
+| Writing confirmed rows | `log-time.mjs --rows f.json --confirm` | `log_time`, one call per row |
+| Submitting a timesheet | — | `submit_timesheet` (no REST equivalent) |
+
+The MCP returns entries; the scripts return the numbers derived from them. A
+90-day calibration is several hundred entries through the MCP and about thirty
+lines through the script, and nobody reads the entries either way.
+
+**When a script exits with `fallback: "mcp"` there is no token** — use the MCP
+column and carry on. That path is fully supported; it is just expensive. Say so
+once, in preflight, and don't repeat it every phase.
 
 ## Phase 0 — preflight
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/doctor.mjs"
+node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-log/scripts/doctor.mjs"
 ```
 
 - `hasConfig: false` → go to Phase 1, then continue.
@@ -29,12 +53,15 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-day/scripts/doctor.mjs"
   an older schema. They are not "healthy checks" and are never suppressed by
   the line budget below. Each one names its own fix; offer to run it.
 - Any failed check → report it in one line and continue with that source
-  disabled. Only a dead Harvest MCP is fatal.
-- Verify the MCP sources yourself with one cheap call each, in parallel:
-  Harvest `get_account_settings`, Calendar `list_calendars`, Atlassian
-  `getAccessibleAtlassianResources`. If Granola or Slack are configured but
-  only expose `authenticate`, tell the user to run `/mcp` and carry on without
-  them.
+  disabled. Only a total loss of Harvest — no working token *and* no working
+  MCP — is fatal.
+- `harvestApi: true` means doctor already authenticated against the REST API;
+  don't re-verify Harvest through the MCP as well. When it is false, check the
+  MCP with `get_account_settings` as before.
+- Verify the other MCP sources yourself with one cheap call each, in parallel:
+  Calendar `list_calendars`, Atlassian `getAccessibleAtlassianResources`. If
+  Granola or Slack are configured but only expose `authenticate`, tell the user
+  to run `/mcp` and carry on without them.
 
 Beyond the warnings, preflight output is at most three lines. Don't narrate
 healthy checks — but never trade a warning for brevity. Silent degradation is
@@ -56,21 +83,29 @@ run the user actually asked for.
   to the evening before. This also moves what `today` means: run at 01:00 and
   `today` is still the previous calendar date, which is the session the user is
   actually in. `references/collectors.md` has the table and the reasoning.
-- **No date given**: call Harvest `list_time_entries` with the user's
-  `user_ids` and `limit: 500` for the last `rules.catchUpWindowDays` days, sum
-  hours per day, and list workdays that are empty or under that day's target
-  (Phase 5 — it is not one number). Ask which to fill.
+- **No date given**: run the catch-up scan and ask which days to fill.
+
+  ```
+  node .../harvest-entries.mjs --catch-up --days 14
+  ```
+
+  It returns one row per day — date, weekday, hours, that day's target, whether
+  it is under — plus a `candidates[]` already filtered the way this phase
+  filters. On `fallback: "mcp"`, call `list_time_entries` with the user's
+  `user_ids` and `limit: 500` over the same window and do the arithmetic
+  yourself, including the pagination note below.
 - **Weekends are not automatically absent.** `rules.skipWeekends` keeps them out
   of the *default* catch-up list, but when `rules.weekendsWithEvidence` is on and
   a weekend day has collector evidence, offer it anyway and say what was found.
   Weekend work is real, it is usually a short evening stretch rather than a day,
   and it is invisible to a rule that never looks. A weekend day offered this way
   targets `calibration.dayTotals.weekend`, never the weekday figure.
-- That call is paginated. **A day looks empty both when nothing was logged and
-  when the page ran out** — so if the response has `truncated: true`, follow
-  `next_cursor` (same parameters, opaque token) before deciding anything is
-  empty. If `scope_limited` is true, permissions are hiding entries: say so and
-  don't report zeros as fact.
+- Either path is paginated. **A day looks empty both when nothing was logged
+  and when the page ran out** — on the MCP path, if the response has
+  `truncated: true`, follow `next_cursor` (same parameters, opaque token) before
+  deciding anything is empty; if `scope_limited` is true, permissions are hiding
+  entries, so say so and don't report zeros as fact. The script paginates
+  itself and reports `truncated` only when it hit its own page cap.
 - Process one day at a time. A range is a loop over days, each with its own
   proposal and its own confirmation.
 
@@ -274,8 +309,9 @@ as well as in preflight — omit it only when the calibration is present.
 - When evidence *overshoots* the target, print that too, with the uncapped
   figure: `evidence 6.75h (capped to 2h) · fill 2h · target 2h  ← target
   may be low`. A day the rows agree on is not the same as a day that's right.
-- Always run `list_time_entries` for that date and user first, and show what's
-  already there. If a proposed row duplicates an existing entry, mark it and
+- Always check what's already logged for that date first
+  (`harvest-entries.mjs --from D --to D`, or `list_time_entries` on the fallback
+  path) and show it. If a proposed row duplicates an existing entry, mark it and
   default to skipping it.
 - Ask which column to use, then accept freeform edits: "row 3 → 2.5", "merge 1
   and 2", "drop 5", "row 5 is ENG/Recruiting", "notes on 3 should say …".
@@ -291,9 +327,29 @@ has a resolved project id and task id, both ≥ 1, and that no row is still
 marked `?` — Harvest rejects `0`, and a rejection halfway down the list leaves
 the day half-logged. Resolve or drop those rows first.
 
-One `log_time` call per row, `spent_at` = the day.
+Write the confirmed rows to a JSON file and run the writer twice — once to
+validate, once to write:
+
+```
+node .../log-time.mjs --rows rows.json              # validates every row, writes nothing
+node .../log-time.mjs --rows rows.json --confirm    # writes
+```
+
+```json
+[ { "spentAt": "2026-07-31", "projectId": 41234567, "taskId": 8912345,
+    "hours": 2.5, "notes": "HUME-5720 select v2 - remaining replacements" } ]
+```
+
+The dry run is not ceremony: it checks every row's ids, dates and hours before
+any of them exists, so a bad row is found while the day is still unlogged rather
+than half-logged. If the write does fail partway, the output names exactly which
+rows landed — report that verbatim rather than re-running the whole file.
+
+On `fallback: "mcp"`, one `log_time` call per row instead, `spent_at` = the day.
+
 Report the created entry ids and the day's total. If the user asks, and it's the
-end of a week, offer `submit_timesheet` — this account has `approval_required`.
+end of a week, offer `submit_timesheet` — this account has `approval_required`,
+and submission is MCP-only.
 
 ## Phase 8 — learn
 

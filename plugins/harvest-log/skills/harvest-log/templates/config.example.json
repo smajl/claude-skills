@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "ticketPattern": "[A-Z][A-Z0-9]{1,9}-\\d+",
   "identity": {
     "gitAuthors": [
@@ -66,7 +66,7 @@
       },
       "huddles": {
         "enabled": true,
-        "tokenEnv": "HARVEST_DAY_SLACK_TOKEN",
+        "tokenEnv": "HARVEST_LOG_SLACK_TOKEN",
         "conversations": [],
         "conversationTypes": "im,mpim,private_channel,public_channel",
         "maxConversations": 80,
@@ -76,6 +76,8 @@
     }
   },
   "harvest": {
+    "tokenEnv": "HARVEST_TOKEN",
+    "accountIdEnv": "HARVEST_ACCOUNT_ID",
     "defaultProjectId": 0,
     "targetHoursPerDay": 8,
     "roundToHours": 0.25,

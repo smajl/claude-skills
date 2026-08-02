@@ -3,7 +3,7 @@ description: Reconstruct a workday from git/GitLab/Jira/calendar and log it to H
 argument-hint: "[today | yesterday | 2026-07-29 | last week | 2026-07-27..2026-07-31]"
 ---
 
-Use the `harvest-day` skill to build and log a Harvest timesheet.
+Use the `harvest-log` skill to build and log a Harvest timesheet.
 
 Date range requested: `$ARGUMENTS`
 
