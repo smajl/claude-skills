@@ -8,9 +8,15 @@
   },
   "plugins": [
     {
-      "name": "harvest-day",
+      "name": "harvest-log",
       "description": "Reconstruct a workday from git, GitLab, Jira, Google Calendar, Granola and Slack, then log it to Harvest after you confirm.",
-      "source": "./plugins/harvest-day",
+      "source": "./plugins/harvest-log",
+      "category": "productivity"
+    },
+    {
+      "name": "harvest-review",
+      "description": "Review your team's logged Harvest time for irregularities — miscategorised work, repeated filler notes, bulk backdating — and verify the flags against GitLab and Jira.",
+      "source": "./plugins/harvest-review",
       "category": "productivity"
     }
   ]

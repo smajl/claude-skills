@@ -1,0 +1,9 @@
+{
+  "name": "harvest-review",
+  "description": "Review your team's logged Harvest time for irregularities — miscategorised work, repeated filler notes, bulk backdating, hours with no trace — and verify each flag against GitLab and Jira.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Jan Peša",
+    "email": "jan.pesa@gmail.com"
+  }
+}

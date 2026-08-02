@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "ticketPattern": "[A-Z][A-Z0-9]{1,9}-\\d+",
+  "harvest": {
+    "tokenEnv": "HARVEST_TOKEN",
+    "accountIdEnv": "HARVEST_ACCOUNT_ID"
+  },
+  "team": [
+    {
+      "harvestUserId": 0,
+      "name": "Example Person",
+      "email": "person@example.com",
+      "gitlabUsername": "person",
+      "jiraAccountId": "",
+      "role": "engineer"
+    }
+  ],
+  "gitlab": {
+    "host": "gitlab.com",
+    "groups": [],
+    "projects": [
+      "acme/product-web",
+      "acme/product-api"
+    ],
+    "maxPagesPerProject": 20
+  },
+  "jira": {
+    "cloudId": ""
+  },
+  "projectByTicketPrefix": {},
+  "taxonomy": {
+    "taskKinds": {
+      "absence": "vacation|pto|holiday|sick|absence|time off|day off|parental",
+      "meeting": "meeting|standup|stand-?up|sync|retro|grooming|refinement|planning|demo|1on1|1-1|workshop|ceremon",
+      "review": "code review|review",
+      "recruiting": "recruit|interview|hiring|screen",
+      "support": "support|on-?call|oncall|incident|ops",
+      "qa": "\\bqa\\b|testing|test",
+      "admin": "admin|management|internal|training|learning|onboarding|documentation|travel|sales|presale",
+      "development": "develop|feature|implementation|coding|maintenance|engineering|delivery|bugfix|programming"
+    },
+    "noteKinds": {
+      "meeting": "\\b(meeting|standup|stand-?up|sync|retro|grooming|refinement|planning|demo|1on1|1:1|call|huddle|workshop|kick-?off|attended)\\b",
+      "review": "\\b(review(ed|ing)?|code review|approved|feedback on|commented on)\\b",
+      "development": "\\b(implement(ed|ing)?|develop(ed|ing)?|cod(ed|ing)|refactor(ed|ing)?|fix(ed|ing)?|bugfix|debug(ged|ging)?|migration|endpoint|component|unit tests?|deploy(ed|ment)?|release|merge request|commit(s|ted)?|branch)\\b",
+      "recruiting": "\\b(interview|candidate|screening|hiring)\\b",
+      "support": "\\b(incident|on-?call|oncall|hotfix|outage|escalation|support ticket)\\b",
+      "admin": "\\b(timesheet|expenses|onboarding|training|course|reading|documentation|wiki|confluence|admin)\\b",
+      "absence": "\\b(vacation|holiday|pto|sick|day off|time off)\\b"
+    }
+  },
+  "thresholds": {
+    "maxHoursPerDay": 10,
+    "hardMaxHoursPerDay": 14,
+    "maxHoursPerWeek": 50,
+    "repeatedNoteDays": 3,
+    "repeatedNoteMinHours": 3,
+    "fillerMinHours": 2,
+    "backdateDays": 7,
+    "bulkSessionMinutes": 30,
+    "bulkMinEntries": 8,
+    "bulkMinDays": 3,
+    "noTraceMinDevHours": 4,
+    "uniformDaysMin": 8,
+    "uniformDaysRatio": 0.9,
+    "ticketResolvedGraceDays": 3,
+    "maxFindings": 80
+  },
+  "holidays": [],
+  "suppressions": []
+}
