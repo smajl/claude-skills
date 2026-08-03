@@ -28,7 +28,7 @@
 // else, so this collector is worth the setup.
 
 import { readFileSync } from 'node:fs'
-import { dayWindow, emit, fail, parseArgs, prune, readConfig, resolveDayStartHour, resolveTimezone } from './lib.mjs'
+import { dayWindow, emit, fail, parseArgs, prune, readConfig, resolveDayStartHour, resolveTimezone, secretAny } from './lib.mjs'
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = args.config ? JSON.parse(readFileSync(args.config, 'utf8')) : readConfig()
@@ -82,14 +82,19 @@ const apiBase = process.env.HARVEST_LOG_SLACK_API_BASE || process.env.HARVEST_DA
 // so a config that put them one level up keeps working.
 function resolveToken() {
   if (typeof args.token === 'string') return args.token
+  // Each name is looked up in the environment and then in the shared key store
+  // at ~/.claude/.env-keys, in that order.
+  //
   // HARVEST_DAY_SLACK_TOKEN is what this variable was called before the plugin
   // was renamed. Still honoured: the token lives in the user's environment, not
   // in this repo, and a rename here shouldn't silently degrade their huddles.
-  if (process.env.HARVEST_LOG_SLACK_TOKEN) return process.env.HARVEST_LOG_SLACK_TOKEN
-  if (process.env.HARVEST_DAY_SLACK_TOKEN) return process.env.HARVEST_DAY_SLACK_TOKEN
-  for (const name of [huddleCfg.tokenEnv, slackCfg.tokenEnv]) {
-    if (name && process.env[name]) return process.env[name]
-  }
+  const found = secretAny(
+    'HARVEST_LOG_SLACK_TOKEN',
+    'HARVEST_DAY_SLACK_TOKEN',
+    huddleCfg.tokenEnv,
+    slackCfg.tokenEnv,
+  )
+  if (found.value) return found.value
   return huddleCfg.token || slackCfg.token || null
 }
 

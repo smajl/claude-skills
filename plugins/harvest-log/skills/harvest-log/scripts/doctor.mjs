@@ -7,7 +7,7 @@
 
 import { existsSync } from 'node:fs'
 import { credentials, get, hasCredentials } from './harvest-api.mjs'
-import { DEFAULT_DAY_START_HOUR, activeConfigPath, configDir, configPath, findRepos, legacyConfigDir, legacyConfigPath, localToday, readConfig, resolveDayStartHour, resolveTimezone, run, emit, usingLegacyConfig } from './lib.mjs'
+import { DEFAULT_DAY_START_HOUR, activeConfigPath, configDir, configPath, findRepos, keysPath, legacyConfigDir, legacyConfigPath, loadKeys, localToday, readConfig, resolveDayStartHour, resolveTimezone, run, emit, secretAny, usingLegacyConfig } from './lib.mjs'
 
 // Bump whenever templates/config.example.json gains or drops a field. A config
 // written against an older schema is missing whatever was added since, and the
@@ -171,16 +171,14 @@ if (cfg) {
   if (cfg.sources?.slack?.enabled && huddles?.enabled !== false) {
     const tokenEnv = huddles?.tokenEnv || cfg.sources.slack.tokenEnv
     const inlineToken = huddles?.token || cfg.sources.slack.token
-    const hasToken = Boolean(
-      process.env.HARVEST_LOG_SLACK_TOKEN || process.env.HARVEST_DAY_SLACK_TOKEN || (tokenEnv && process.env[tokenEnv]) || inlineToken,
-    )
-    if (!hasToken) {
+    const found = secretAny('HARVEST_LOG_SLACK_TOKEN', 'HARVEST_DAY_SLACK_TOKEN', tokenEnv)
+    if (!found.value && !inlineToken) {
       warn(
-        `no Slack user token found${tokenEnv ? ` in $${tokenEnv} or $HARVEST_LOG_SLACK_TOKEN` : ' in $HARVEST_LOG_SLACK_TOKEN'} — huddle durations and participants are unavailable, so huddles fall back to start-events read through the MCP and each one is proposed at the ${huddles?.fallbackHuddleHours ?? 0.5}h default. See references/setup.md to create one.`,
+        `no Slack user token found in ${[tokenEnv, 'HARVEST_LOG_SLACK_TOKEN'].filter(Boolean).join(' or ')} — neither the environment nor ${keysPath()}. Huddle durations and participants are unavailable, so huddles fall back to start-events read through the MCP and each one is proposed at the ${huddles?.fallbackHuddleHours ?? 0.5}h default. See references/setup.md to create one.`,
       )
     }
     if (inlineToken) {
-      warn('a Slack token is stored in plain text inside config.json — move it to an environment variable and set sources.slack.huddles.tokenEnv to its name.')
+      warn(`a Slack token is stored in plain text inside config.json — move it with \`node keys.mjs --set HARVEST_LOG_SLACK_TOKEN\` and delete it from the config.`)
     }
   }
 }
@@ -200,8 +198,8 @@ if (hasCredentials(cfg)) {
     name: 'harvest-api',
     ok: me.ok,
     detail: me.ok
-      ? `authenticated as ${me.data.email} (user ${me.data.id}) via $${creds.tokenEnv}`
-      : `${me.error} — fix the token or unset $${creds.tokenEnv} to fall back to the MCP`,
+      ? `authenticated as ${me.data.email} (user ${me.data.id}) via ${creds.tokenEnv}, from ${creds.source.token}`
+      : `${me.error} — fix the token or clear ${creds.tokenEnv} to fall back to the MCP`,
   })
   // A token belonging to one person and a config naming another produces
   // entries logged against the wrong user, silently and irreversibly.
@@ -213,7 +211,7 @@ if (hasCredentials(cfg)) {
 } else if (cfg) {
   const creds = credentials(cfg)
   warn(
-    `no Harvest personal access token found in $${creds.tokenEnv} / $${creds.accountEnv} — falling back to the Harvest MCP. That works, but setup and the catch-up scan then read every entry into the conversation instead of a summary. See references/setup.md step 0 to create one.`,
+    `no Harvest personal access token found in ${creds.tokenEnv} / ${creds.accountEnv} — neither the environment nor ${keysPath()}. Falling back to the Harvest MCP: that works, but setup and the catch-up scan then read every entry into the conversation instead of a summary. See references/setup.md step 0 to create one.`,
   )
 }
 
@@ -255,9 +253,17 @@ if (cfg) {
   })
 }
 
+// A malformed or over-permissive key file is worth hearing about even when
+// every credential in it happened to resolve.
+const keyFile = loadKeys({ reload: true })
+for (const w of keyFile.warnings) warn(w)
+if (keyFile.error) warn(keyFile.error)
+
 emit({
   ok: checks.every((c) => c.ok),
   configPath: activeConfigPath(),
+  keysPath: keysPath(),
+  hasKeysFile: keyFile.exists,
   legacyConfigPath: legacy ? legacyConfigPath() : null,
   hasConfig: Boolean(cfg),
   schemaVersion: SCHEMA_VERSION,

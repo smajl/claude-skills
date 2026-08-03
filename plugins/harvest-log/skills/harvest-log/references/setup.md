@@ -16,26 +16,39 @@ Ask for it once, and take no for an answer — the MCP path works.
 1. <https://id.getharvest.com/developers> → **Create new personal access token**.
    Name it `harvest`.
 2. Copy the token *and* the account id shown beside it.
-3. Into the environment, never into the config:
+3. Into the shared key store, never into the config.
+
+   Every plugin in this marketplace resolves a credential the same way: the
+   process environment first, then `~/.claude/.env-keys`
+   (`$CLAUDE_CONFIG_DIR/.env-keys`). The config holds only the *name* of the
+   variable, so it stays safe to copy between machines.
+
+   **The user pipes the value in; you never handle it.** `keys.mjs` has no
+   `--value` flag on purpose — an argument would land in shell history, in the
+   process list, and in this conversation's transcript, which is the one place
+   the user cannot revoke it from. Ask them to run it themselves (in Claude
+   Code, prefixing the line with `!` runs it right here):
 
    ```powershell
-   # PowerShell, persisted for this user
-   [Environment]::SetEnvironmentVariable('HARVEST_TOKEN', 'pat...', 'User')
-   [Environment]::SetEnvironmentVariable('HARVEST_ACCOUNT_ID', '123456', 'User')
+   # PowerShell
+   $v = Read-Host -MaskInput 'token'; $v | node ".../scripts/keys.mjs" --set HARVEST_TOKEN
    ```
 
    ```bash
-   # bash / zsh
-   export HARVEST_TOKEN=pat...
-   export HARVEST_ACCOUNT_ID=123456
+   # bash / zsh — the leading space keeps it out of history too
+    read -rs V && printf %s "$V" | node .../scripts/keys.mjs --set HARVEST_TOKEN
    ```
 
-   A new terminal is needed for a persisted PowerShell variable to be visible.
-   Set `harvest.tokenEnv` / `harvest.accountIdEnv` for other names.
+   The account id is not a secret; set it directly. `node keys.mjs --list` shows
+   what is configured and where each value came from, never the values
+   themselves. Set `harvest.tokenEnv` / `harvest.accountIdEnv` for other names.
 
-**The same token serves `harvest-review`**, which needs one and cannot degrade
-to the MCP at team scale. If the user has already set it up for that plugin,
-there is nothing to do here.
+   Exported environment variables still work and still win over the file, so
+   there is nothing to migrate for anyone who already has them.
+
+**The same token serves `harvest-review`**, from the same file, and that plugin
+needs one — it cannot degrade to the MCP at team scale. If the user has already
+set it up for that plugin, there is nothing to do here.
 
 The token only ever needs to see the user's own time, so a plain member account
 is enough. `doctor.mjs` reports `harvestApi: true` once it works, and warns —
@@ -192,11 +205,11 @@ Walk them through it rather than pasting a link and hoping:
 3. **Install to Workspace**, then copy the **User** OAuth Token — it starts
    `xoxp-`. If their workspace requires admin approval to install apps, this
    step is where it will stop, and the fallback path is the answer.
-4. Put it in an environment variable, not in the config:
+4. Into the key store, the same way as step 0 — the user pipes it in:
 
    ```powershell
-   # PowerShell, persisted for this user
-   [Environment]::SetEnvironmentVariable('HARVEST_LOG_SLACK_TOKEN', 'xoxp-…', 'User')
+   $v = Read-Host -MaskInput 'xoxp token'
+   $v | node ".../scripts/keys.mjs" --set HARVEST_LOG_SLACK_TOKEN
    ```
 
    Set `sources.slack.huddles.tokenEnv` if they'd rather use a different

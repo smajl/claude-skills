@@ -10,7 +10,8 @@
 
 import { existsSync } from 'node:fs'
 import {
-  cacheDir, configPath, emit, harvestCredentials, harvestPaged, readConfig, run,
+  cacheDir, configPath, emit, harvestCredentials, harvestPaged, keysPath,
+  loadKeys, readConfig, run,
 } from './lib.mjs'
 
 const SCHEMA_VERSION = 1
@@ -20,19 +21,36 @@ const checks = []
 const warnings = []
 const warn = (m) => warnings.push(m)
 
+// [dotted.path, value] for every leaf, so a credential can be reported by
+// where it is rather than by what it says.
+function* flatten(obj, prefix = '') {
+  for (const [k, v] of Object.entries(obj || {})) {
+    const path = prefix ? `${prefix}.${k}` : k
+    if (v && typeof v === 'object') yield* flatten(v, path)
+    else yield [path, v]
+  }
+}
+
 checks.push({
   name: 'config',
   ok: Boolean(cfg),
   detail: cfg ? configPath() : `missing at ${configPath()} — run setup`,
 })
 
+// Where secrets are coming from, never what they are. `keys-file` and `env`
+// both work; which one is in play is the first thing to know when a token that
+// is definitely set is definitely not being seen.
+const keyFile = loadKeys({ reload: true })
+for (const w of keyFile.warnings) warn(w)
+if (keyFile.error) warn(keyFile.error)
+
 const creds = harvestCredentials(cfg)
 checks.push({
   name: 'harvest-credentials',
   ok: Boolean(creds.token && creds.accountId),
   detail: creds.token && creds.accountId
-    ? `token in $${creds.tokenEnv}, account in $${creds.accountEnv}`
-    : `set $${creds.tokenEnv} and $${creds.accountEnv} — create a PAT at https://id.getharvest.com/developers`,
+    ? `token from ${creds.source.token}, account from ${creds.source.accountId}`
+    : `set ${creds.tokenEnv} and ${creds.accountEnv} — create a PAT at https://id.getharvest.com/developers, then \`node keys.mjs --set ${creds.tokenEnv}\``,
 })
 
 let visibleUsers = null
@@ -89,6 +107,16 @@ if (cfg) {
     problems,
   })
 
+  // A secret pasted into config.json is a secret in a file people copy between
+  // machines and paste into issues. The indirection — config names the
+  // variable, the key store holds the value — only works if nobody shortcuts it.
+  for (const [path, value] of flatten(cfg)) {
+    if (typeof value !== 'string') continue
+    if (/^(pat\.[\w.-]{20,}|xoxp-[\w-]{10,}|[a-f0-9]{40,})$/i.test(value.trim())) {
+      warn(`${path} in config.json looks like a credential. Move it to ${keysPath()} with \`node keys.mjs --set <NAME>\` and leave only the variable name in the config.`)
+    }
+  }
+
   const version = Number(cfg.version || 0)
   if (version < SCHEMA_VERSION) {
     warn(`config is schema v${version || '?'}, current is v${SCHEMA_VERSION} — re-run setup to pick up fields added since.`)
@@ -125,6 +153,8 @@ if (!glab.ok) {
 emit({
   ok: checks.every((c) => c.ok),
   configPath: configPath(),
+  keysPath: keysPath(),
+  hasKeysFile: keyFile.exists,
   hasConfig: Boolean(cfg),
   schemaVersion: SCHEMA_VERSION,
   configVersion: cfg ? Number(cfg.version || 0) : null,

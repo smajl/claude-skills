@@ -2,21 +2,23 @@
 // No dependencies — plain Node, works on Windows / macOS / Linux.
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { extname, join } from 'node:path'
+import { dirname, extname, join } from 'node:path'
+
+export function claudeDir() {
+  return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
+}
 
 export function configDir() {
-  const base = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
-  return join(base, 'harvest-log')
+  return join(claudeDir(), 'harvest-log')
 }
 
 // Where the config lived when this plugin was called harvest-day. Read-only:
 // nothing new is ever written here, but a config that predates the rename is
 // still a perfectly good config and shouldn't strand the user in setup again.
 export function legacyConfigDir() {
-  const base = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
-  return join(base, 'harvest-day')
+  return join(claudeDir(), 'harvest-day')
 }
 
 export function configPath() {
@@ -50,6 +52,155 @@ export function writeConfig(cfg) {
   mkdirSync(configDir(), { recursive: true })
   writeFileSync(configPath(), JSON.stringify(cfg, null, 2) + '\n', 'utf8')
   return configPath()
+}
+
+// --- Secrets -------------------------------------------------------------
+//
+// Deliberately identical to harvest-review's copy — the two plugins install and
+// version independently and cannot import from each other, but they must agree
+// on where keys live, because $HARVEST_TOKEN is one token serving both. Fix a
+// bug here and fix it there.
+//
+// Environment first, then the shared file at `~/.claude/.env-keys`
+// (`$CLAUDE_CONFIG_DIR/.env-keys`). The environment winning is what keeps CI
+// and one-off overrides working. config.json still stores the variable *name*,
+// never the value.
+//
+// Format: a small subset of dotenv — `KEY=value`, `#` comments, optional
+// surrounding quotes. No interpolation and no multi-line values, because a key
+// store that can reference or execute things is a key store with surprises.
+
+export function keysPath() {
+  return join(claudeDir(), '.env-keys')
+}
+
+// Read the key file whatever Windows wrote it as.
+//
+// This matters more than it sounds. `$v > .env-keys` and `Out-File` in Windows
+// PowerShell produce **UTF-16LE with a BOM**, so a file that looks perfect in
+// an editor arrives here as `H\0A\0R\0V\0...` and every key name misses. The
+// failure mode is the worst kind: the file exists, the key is in it, `--list`
+// says it is not set, and nothing looks wrong.
+//
+// So: sniff the BOM and decode accordingly rather than assuming UTF-8. Files
+// this code writes are always UTF-8, and rewriting a UTF-16 one converts it.
+function readTextFile(path) {
+  const buf = readFileSync(path)
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return buf.toString('utf16le', 2)
+  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) return buf.swap16().toString('utf16le', 2)
+  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) return buf.toString('utf8', 3)
+  return buf.toString('utf8')
+}
+
+let keysCache = null
+
+export function loadKeys({ reload = false } = {}) {
+  if (keysCache && !reload) return keysCache
+  const path = keysPath()
+  const result = { path, exists: false, keys: {}, error: null, warnings: [] }
+  keysCache = result
+  if (!existsSync(path)) return result
+  result.exists = true
+
+  // A key file the rest of the machine can read is worse than no key file,
+  // because it looks like it solved the problem. Windows has no mode bits worth
+  // checking here — the profile directory's ACL is the control.
+  if (process.platform !== 'win32') {
+    try {
+      const mode = statSync(path).mode & 0o777
+      if (mode & 0o077) {
+        result.warnings.push(`${path} is mode ${mode.toString(8)} — readable by other accounts on this machine. Run \`chmod 600\` on it.`)
+      }
+    } catch { /* stat failing is not worth aborting a run over */ }
+  }
+
+  let text
+  try {
+    text = readTextFile(path)
+  } catch (e) {
+    result.error = `could not read ${path}: ${e.message}`
+    return result
+  }
+
+  let lineNo = 0
+  for (const raw of text.split(/\r?\n/)) {
+    lineNo++
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const eq = line.indexOf('=')
+    if (eq < 1) {
+      // Never echo the line: whatever is malformed about it, it is still a
+      // file full of credentials.
+      result.warnings.push(`${path}:${lineNo} is not KEY=value — ignored`)
+      continue
+    }
+    const key = line.slice(0, eq).replace(/^export\s+/, '').trim()
+    let value = line.slice(eq + 1).trim()
+    const quoted = value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+    if (quoted) value = value.slice(1, -1)
+    if (key) result.keys[key] = value
+  }
+  return result
+}
+
+// { name, value, source } — source is 'env', 'keys-file' or null. Callers that
+// report on configuration use the source; callers that authenticate use the
+// value and nothing else.
+export function secret(name) {
+  if (!name) return { name, value: null, source: null }
+  if (process.env[name]) return { name, value: process.env[name], source: 'env' }
+  const file = loadKeys()
+  if (file.keys[name]) return { name, value: file.keys[name], source: 'keys-file' }
+  return { name, value: null, source: null }
+}
+
+// First name that resolves, so a plugin can keep honouring a legacy variable
+// without preferring it.
+export function secretAny(...names) {
+  for (const n of names.filter(Boolean)) {
+    const s = secret(n)
+    if (s.value) return s
+  }
+  return { name: names.find(Boolean) || null, value: null, source: null }
+}
+
+// Upsert one key, preserving comments, order and everything else in the file.
+// The value never passes through a shell: `keys.mjs --set` pipes it in on
+// stdin, so it stays out of shell history and out of an agent transcript.
+export function writeKey(name, value) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`"${name}" is not a valid environment variable name`)
+  if (/[\r\n]/.test(value)) throw new Error('a key value cannot contain a newline')
+  const path = keysPath()
+  mkdirSync(dirname(path), { recursive: true })
+
+  const lines = existsSync(path) ? readTextFile(path).split(/\r?\n/) : []
+  const line = `${name}=${value}`
+  let replaced = false
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim()
+    if (t.startsWith('#')) continue
+    const eq = t.indexOf('=')
+    if (eq < 1) continue
+    if (t.slice(0, eq).replace(/^export\s+/, '').trim() !== name) continue
+    lines[i] = line
+    replaced = true
+    break
+  }
+  if (!replaced) {
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop()
+    lines.push(line)
+  }
+
+  // Write restrictively from the first byte rather than fixing the mode after —
+  // the gap between the two is exactly when a secret is world-readable.
+  writeFileSync(path, lines.join('\n').replace(/\n*$/, '\n'), { encoding: 'utf8', mode: 0o600 })
+  if (process.platform !== 'win32') {
+    try {
+      chmodSync(path, 0o600)
+    } catch { /* best effort on filesystems without mode bits */ }
+  }
+  keysCache = null
+  return { path, name, replaced }
 }
 
 // Windows only: find what a bare command name actually refers to, the way the

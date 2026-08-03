@@ -42,7 +42,8 @@ and logs them **only after you confirm**.
 |---|---|
 | 🚀 Run | `/harvest` · `/harvest yesterday` · `/harvest 2026-07-27..2026-07-31` |
 | ⚙️ Config | `~/.claude/harvest-log/config.json` — written by the first-run wizard |
-| 🔌 Needs | Harvest PAT (`$HARVEST_TOKEN`, `$HARVEST_ACCOUNT_ID`) or the Harvest MCP · `glab` · Google Calendar, Atlassian, Granola & Slack connectors |
+| 🔑 Keys | `~/.claude/.env-keys` — `HARVEST_TOKEN`, `HARVEST_ACCOUNT_ID`, `HARVEST_LOG_SLACK_TOKEN` |
+| 🔌 Needs | A Harvest PAT or the Harvest MCP · `glab` · Google Calendar, Atlassian, Granola & Slack connectors |
 | 🩺 Check | `node .../scripts/doctor.mjs` reports what's wired and what isn't |
 
 Bare `/harvest` finds the days in the last two weeks that are empty or under
@@ -82,12 +83,32 @@ they agree with it.
 |---|---|
 | 🚀 Run | `/harvest-review` · `/harvest-review last month` · `/harvest-review Sam last week` |
 | ⚙️ Config | `~/.claude/harvest-review/config.json` — roster, taxonomy, thresholds |
-| 🔌 Needs | Harvest PAT (`$HARVEST_TOKEN`, `$HARVEST_ACCOUNT_ID`) · `glab` · Atlassian connector |
+| 🔑 Keys | `~/.claude/.env-keys` — `HARVEST_TOKEN`, `HARVEST_ACCOUNT_ID` |
+| 🔌 Needs | A Harvest PAT that can see other people's time · `glab` · Atlassian connector |
 | 🩺 Check | `node .../scripts/doctor.mjs` — including whether the token can see anyone but you |
 
 Read-only: it has no write path into Harvest. Findings are questions to ask, not
 verdicts — every detector documents the innocent explanation it cannot rule out,
 and the report names everyone it could not check rather than listing them clean.
+
+---
+
+## 🔑 API keys
+
+One store for every plugin here: `~/.claude/.env-keys`, `KEY=value` per line,
+written 0600. Lookup order is the process environment, then that file — so
+anything already exported keeps working and still wins.
+
+```
+node .../scripts/keys.mjs --list                 # names, sources, never values
+ read -rs V && printf %s "$V" | node .../scripts/keys.mjs --set BAMBOO_API_KEY
+```
+
+There is no `--set NAME value` form on purpose. A secret passed as an argument
+lands in shell history, in the process list, and — when Claude is driving the
+terminal — in the conversation transcript, which is the one place you cannot
+revoke it from. Config files hold the *name* of the variable, never the value;
+`doctor.mjs` warns if a credential ends up written into one.
 
 ---
 

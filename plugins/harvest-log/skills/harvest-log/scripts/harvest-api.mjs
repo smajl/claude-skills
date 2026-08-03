@@ -6,22 +6,32 @@
 // arrive in a variable, and the scripts print the handful of numbers actually
 // derived from them.
 //
-// Credentials come from the environment — $HARVEST_TOKEN and
-// $HARVEST_ACCOUNT_ID by default, overridable via harvest.tokenEnv /
-// harvest.accountIdEnv. The same pair serves harvest-review, so one personal
-// access token covers both plugins.
+// Credentials resolve the way every key in this marketplace does: the
+// environment first, then the shared store at `~/.claude/.env-keys`. Names are
+// $HARVEST_TOKEN and $HARVEST_ACCOUNT_ID by default, overridable via
+// harvest.tokenEnv / harvest.accountIdEnv. The same pair serves harvest-review,
+// so one personal access token covers both plugins.
 //
 // Nothing here writes except postTimeEntry, which is called by exactly one
 // script (log-time.mjs) and only after the user has confirmed a table.
+
+import { secretAny } from './lib.mjs'
 
 const BASE = process.env.HARVEST_LOG_API_BASE || 'https://api.harvestapp.com/api/v2'
 
 export function credentials(cfg) {
   const tokenEnv = cfg?.harvest?.tokenEnv || 'HARVEST_TOKEN'
   const accountEnv = cfg?.harvest?.accountIdEnv || 'HARVEST_ACCOUNT_ID'
-  const token = process.env[tokenEnv] || process.env.HARVEST_LOG_TOKEN || null
-  const accountId = process.env[accountEnv] || process.env.HARVEST_LOG_ACCOUNT_ID || null
-  return { token, accountId, tokenEnv, accountEnv }
+  const token = secretAny(tokenEnv, 'HARVEST_LOG_TOKEN')
+  const account = secretAny(accountEnv, 'HARVEST_LOG_ACCOUNT_ID')
+  return {
+    token: token.value,
+    accountId: account.value,
+    tokenEnv,
+    accountEnv,
+    // Where each came from, for doctor. Never the values.
+    source: { token: token.source, accountId: account.source },
+  }
 }
 
 export function hasCredentials(cfg) {
@@ -32,7 +42,7 @@ export function hasCredentials(cfg) {
 export function missingCredentialsMessage(cfg) {
   const c = credentials(cfg)
   return (
-    `Harvest credentials missing — set $${c.tokenEnv} and $${c.accountEnv}, or fall back to the Harvest MCP. ` +
+    `Harvest credentials missing — set ${c.tokenEnv} and ${c.accountEnv} (\`node keys.mjs --set ${c.tokenEnv}\`), or fall back to the Harvest MCP. ` +
     'Create a personal access token at https://id.getharvest.com/developers.'
   )
 }
