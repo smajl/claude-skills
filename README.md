@@ -70,6 +70,7 @@ they agree with it.
    fetch │  Harvest REST → a cache file, not the conversation
          │
    sweep │  one pass of GitLab project events covers the whole team
+         │  BambooHR says who was on holiday, and when
          │
     scan │  deterministic detectors — miscategorised work, notes repeated for
          │  days, a month backdated in one sitting, hours with no trace
@@ -83,13 +84,19 @@ they agree with it.
 |---|---|
 | 🚀 Run | `/harvest-review` · `/harvest-review last month` · `/harvest-review Sam last week` |
 | ⚙️ Config | `~/.claude/harvest-review/config.json` — roster, taxonomy, thresholds |
-| 🔑 Keys | `~/.claude/.env-keys` — `HARVEST_TOKEN`, `HARVEST_ACCOUNT_ID` |
-| 🔌 Needs | A Harvest PAT that can see other people's time · `glab` · Atlassian connector |
+| 🔑 Keys | `~/.claude/.env-keys` — `HARVEST_TOKEN`, `HARVEST_ACCOUNT_ID`, `BAMBOO_API_KEY` |
+| 🔌 Needs | A Harvest PAT that can see other people's time · `glab` · Atlassian connector · BambooHR (optional) |
 | 🩺 Check | `node .../scripts/doctor.mjs` — including whether the token can see anyone but you |
 
 Read-only: it has no write path into Harvest. Findings are questions to ask, not
 verdicts — every detector documents the innocent explanation it cannot rule out,
 and the report names everyone it could not check rather than listing them clean.
+
+BambooHR is optional and pulls its weight: without it a week of holiday is
+indistinguishable from a week of nothing, and the report asks the manager to
+chase people about their own vacations. With it, approved leave and company
+holidays are excluded — and a full day billed against an approved day off
+becomes a finding of its own.
 
 ---
 

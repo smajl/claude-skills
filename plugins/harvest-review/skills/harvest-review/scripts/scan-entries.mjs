@@ -8,6 +8,7 @@
 //   node scan-entries.mjs --entries <cache.json>
 //   node scan-entries.mjs --entries <cache.json> --activity <gitlab.json>
 //   node scan-entries.mjs --entries <cache.json> --activity <g.json> --jira <j.json>
+//   node scan-entries.mjs --entries <cache.json> --activity <g.json> --timeoff <t.json>
 //
 // A finding is a question, never a verdict. Every one of these patterns has an
 // innocent explanation — a standup really is the same 15 minutes every day, a
@@ -30,6 +31,7 @@ if (!args.entries) fail('--entries <path> is required (the cache written by fetc
 const cache = readJson(String(args.entries))
 const activity = args.activity ? readJson(String(args.activity)) : null
 const jira = args.jira ? readJson(String(args.jira)) : null
+const timeoff = args.timeoff ? readJson(String(args.timeoff)) : null
 const entries = cache.entries || []
 if (!entries.length) fail('the entries cache is empty — nothing to scan')
 
@@ -47,6 +49,7 @@ const T = {
   bulkMinEntries: 8,
   bulkMinDays: 3,
   noTraceMinDevHours: 4,
+  absenceMinWorkHours: 4,
   uniformDaysMin: 8,
   uniformDaysRatio: 0.9,
   ticketResolvedGraceDays: 3,
@@ -103,7 +106,29 @@ const GENERIC_NOTES = new Set([
 ])
 
 const ticketPattern = cfg.ticketPattern
-const holidays = new Set(cfg.holidays || [])
+
+// Holidays come from two places and are merged rather than chosen between: the
+// hand-written `holidays` list still holds for anyone whose Bamboo is not
+// wired up, and BambooHR knows the ones nobody remembered to add.
+const holidays = new Set([...(cfg.holidays || []), ...(timeoff?.holidays || [])])
+
+// --- Time off ------------------------------------------------------------
+//
+// Leave is the missing half of `no-trace`. Without it, the check cannot tell a
+// week of undone work from a week in Croatia, and it resolves that ambiguity
+// the wrong way — against the person — for everyone who took holiday without
+// also logging it as an absence entry in Harvest.
+//
+// `leaveKnownFor` is the other half of the same idea. Somebody absent from the
+// Bamboo cache either took no leave or was never mapped to an employee id, and
+// those must not read the same: the first is a fact about the person, the
+// second is a fact about the config.
+const leaveByUser = new Map(
+  Object.entries(timeoff?.byHarvestUserId || {}).map(([id, v]) => [Number(id), v.days || {}]),
+)
+const leaveKnownFor = new Set((timeoff?.mappedHarvestUserIds || []).map(Number))
+const leaveOn = (userId, date) => (leaveKnownFor.has(userId) ? leaveByUser.get(userId)?.[date] || null : null)
+
 const teamByHarvestId = new Map((cfg.team || []).map((m) => [m.harvestUserId, m]))
 
 const compiled = (map) =>
@@ -201,6 +226,7 @@ for (const e of entries) {
 // about a person.
 const unmapped = new Set()
 const invisible = new Set()
+const noLeaveData = new Set()
 
 const byUser = groupBy(entries, (e) => e.userId)
 const period = { from: cache.from, to: cache.to }
@@ -554,6 +580,10 @@ for (const [userId, userEntries] of byUser) {
       for (const [date, dayEntries] of [...byDay.entries()].sort()) {
         if (isWeekend(date) || holidays.has(date)) continue
         if (dayEntries.some((e) => e.kind === 'absence')) continue
+        // Approved leave answers the question this rule asks, so it never gets
+        // asked. Leave still only *requested* does not: it is a plan, and the
+        // day may well have been worked.
+        if (leaveOn(userId, date)?.status === 'approved') continue
         const devHours = sum(dayEntries.filter((e) => e.kind === 'development' || e.kind === 'review').map((e) => e.hours))
         if (devHours < T.noTraceMinDevHours) continue
         if (days[date]) continue
@@ -583,7 +613,53 @@ for (const [userId, userEntries] of byUser) {
     }
   }
 
-  // --- 11. Development entries that name no ticket -----------------------
+  // --- 11. Work logged on a day BambooHR says they were on leave ---------
+  //
+  // The other side of the time-off coin. Suppressing no-trace on holidays is
+  // the reason this source exists; this rule is what the same data is worth
+  // once you have it — an approved day off with a full day of billed work on
+  // it is either an entry on the wrong date or leave that was never cancelled,
+  // and both are worth a sentence.
+  //
+  // Deliberately narrow. Absence entries are excluded, since logging Vacation
+  // against a vacation day is the correct behaviour rather than a finding. A
+  // half day of leave only fires against most of a day's work, because working
+  // the other half of a half day is what a half day *is*.
+  if (timeoff) {
+    if (!leaveKnownFor.has(userId)) {
+      noLeaveData.add(name)
+    } else {
+      const worked = []
+      for (const [date, dayEntries] of [...byDay.entries()].sort()) {
+        const leave = leaveOn(userId, date)
+        if (leave?.status !== 'approved') continue
+        const workHours = sum(dayEntries.filter((e) => e.kind !== 'absence').map((e) => e.hours))
+        const fullDay = leave.hours === null || leave.hours >= 6
+        if (workHours < (fullDay ? T.absenceMinWorkHours : 6)) continue
+        worked.push({ date, hours: round(workHours, 0.01), type: leave.type, leaveHours: leave.hours })
+      }
+      for (const streak of streaks(worked)) {
+        const hours = round(sum(streak.map((d) => d.hours)), 0.01)
+        const type = streak.find((d) => d.type)?.type || 'time off'
+        add({
+          ...base,
+          rule: 'logged-during-absence',
+          severity: streak.length >= 3 || hours >= 16 ? 'high' : 'medium',
+          dates: streak.map((d) => d.date),
+          hours,
+          entryIds: streak.flatMap((d) => (byDay.get(d.date) || []).map((e) => e.id)),
+          summary: `${hours}h logged over ${plural(streak.length, 'day', 'days')} (${streak[0].date}${streak.length > 1 ? `–${streak[streak.length - 1].date}` : ''}) that BambooHR records as approved ${type}`,
+          evidence: {
+            leaveType: type,
+            days: streak.map((d) => `${d.date}: ${d.hours}h logged${d.leaveHours ? `, ${d.leaveHours}h leave` : ''}`),
+          },
+          check: 'ask',
+        })
+      }
+    }
+  }
+
+  // --- 12. Development entries that name no ticket -----------------------
   //
   // Only for people who normally do name one. Half the team writing notes
   // without keys is a convention, not a finding.
@@ -607,7 +683,7 @@ for (const [userId, userEntries] of byUser) {
   }
 }
 
-// --- 12. The same note, from two different people, on the same day -------
+// --- 13. The same note, from two different people, on the same day -------
 //
 // Real when they paired, and the note usually says so. Worth surfacing because
 // the alternative — one person's timesheet copied into another's — is invisible
@@ -687,6 +763,20 @@ emit({
   inputs: {
     activity: args.activity ? { from: activity?.from, to: activity?.to, projects: (activity?.projectsScanned || []).length } : null,
     jira: args.jira ? { issues: jira?.issues?.length || 0, missing: (jira?.missing || []).length } : null,
+    timeoff: args.timeoff
+      ? {
+          people: (timeoff?.people || []).length,
+          covering: leaveKnownFor.size,
+          // Named, not counted. BambooHR's holidays carry no location, so a
+          // regional one — "Public Holiday, Northern Ireland" — excuses a quiet
+          // day for everybody, including the half of the team it does not apply
+          // to. That only ever suppresses a finding, never invents one, so the
+          // merge stays; but a day excused for a reason nobody can see is the
+          // kind of silence this skill exists to avoid. Print these in the
+          // report's coverage block.
+          holidaysApplied: (timeoff?.holidayNames || (timeoff?.holidays || []).map((date) => ({ date, name: null }))),
+        }
+      : null,
   },
   perUser,
   counts: findings.reduce((acc, f) => ({ ...acc, [f.severity]: (acc[f.severity] || 0) + 1 }), {}),
@@ -703,6 +793,13 @@ emit({
     gitlabActivity: args.activity ? null : 'run collect-gitlab-team.mjs and re-scan with --activity to check development hours against real activity',
     unmappedUsers: unmapped.size ? [...unmapped] : null,
     invisibleUsers: invisible.size ? [...invisible] : null,
+    // Without leave data every no-trace finding carries an unexcluded innocent
+    // explanation, and the report has to say so instead of implying it ruled
+    // holidays out.
+    timeOff: args.timeoff
+      ? null
+      : 'run fetch-timeoff.mjs and re-scan with --timeoff — until then a no-trace finding cannot distinguish a quiet week from a holiday',
+    noLeaveDataFor: noLeaveData.size ? [...noLeaveData] : null,
   },
   suppressed: suppressedFindings.length ? suppressedFindings : null,
 })

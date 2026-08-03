@@ -142,15 +142,67 @@ Every team member should appear in `perUser` with a plausible number of active
 days. Anyone missing is either genuinely not in these repos or mapped to the
 wrong handle — settle which before the first real review, not during it.
 
-## 7. Holidays
+## 7. BambooHR — time off
+
+Optional, and the most valuable optional source in the skill. Harvest cannot
+tell a quiet week from a week in Croatia. Without leave data, every day of
+approved holiday that somebody did not *also* log as an absence entry becomes a
+candidate `no-trace` finding, and the manager is handed a list that asks them to
+chase people about their own vacations.
+
+1. In BambooHR: the user's own avatar → **API Keys** → **Add New Key**. Name it
+   `harvest-review`.
+2. **A key inherits the permissions of the person who made it.** A key made by
+   someone with self-service access only can see one employee — its owner — and
+   returns a well-formed empty answer for everyone else, which suppresses
+   nothing while looking exactly like a team that never takes holidays. If the
+   user is not an admin or an HR/manager role in Bamboo, check this before
+   trusting a clean run. `doctor.mjs` counts visible employees and warns at one.
+3. The key goes in via stdin (section 1); the subdomain goes straight in the
+   config. It is the first label of the Bamboo URL — `acme` in
+   `acme.bamboohr.com`, not the whole host.
+
+```json
+"bamboo": { "enabled": true, "subdomain": "acme", "apiKeyEnv": "BAMBOO_API_KEY" }
+```
+
+Then map Harvest people to Bamboo employees:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-review/scripts/fetch-timeoff.mjs" --directory
+```
+
+`matched[]` is matched on work email, which is the only field the two systems
+agree on exactly — write those into `team[].bambooEmployeeId`. `unmatched[]`
+carries name-based candidates: **confirm each one with the user before writing
+it.** A wrong employee id means somebody else's holidays silently suppress this
+person's findings, which is worse than no mapping at all — an unmapped person is
+reported as unmapped, and doctor names them.
+
+Verify against a period you know contained leave:
+
+```
+node .../fetch-timeoff.mjs --from <a month with a known holiday> --to <its end>
+```
+
+The people, ranges and leave types should match what the user knows. If
+`employeesWithTimeOff` is 0 or 1 across a whole month for a real team, it is the
+key's permissions, not a team that never rests.
+
+## 8. Holidays
 
 `holidays[]` keeps public holidays out of the `no-trace` check. A day nobody
 worked is a day with no GitLab activity, and without the list every national
 holiday produces a finding against everyone who logged it.
 
-## 8. Write, then say what is not covered
+With Bamboo configured this is mostly handled: company holidays come back from
+`whos_out` and are merged with `holidays[]` at scan time. Keep the list for
+anything Bamboo does not know about — and populate it properly if Bamboo is not
+being set up at all.
+
+## 9. Write, then say what is not covered
 
 Confirm the config path in one line, then name what the setup left uncovered —
-unmapped people, unclassified tasks, prefixes not mapped. Those are the parts of
-the first review that will silently pass, and the user should hear about them
-before the report rather than in it.
+unmapped people, unclassified tasks, prefixes not mapped, anyone with no Bamboo
+employee id. Those are the parts of the first review that will silently pass,
+and the user should hear about them before the report rather than in it.

@@ -10,11 +10,11 @@
 
 import { existsSync } from 'node:fs'
 import {
-  cacheDir, configPath, emit, harvestCredentials, harvestPaged, keysPath,
-  loadKeys, readConfig, run,
+  bambooCredentials, bambooGet, cacheDir, configPath, emit, harvestCredentials,
+  harvestPaged, keysPath, loadKeys, readConfig, run,
 } from './lib.mjs'
 
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 const cfg = readConfig()
 const checks = []
@@ -137,6 +137,44 @@ if (cfg) {
   }
   if (visibleUsers && team.length && visibleUsers < team.length) {
     warn(`config lists ${team.length} team members but the token sees ${visibleUsers} users — some of the roster may be invisible to this token.`)
+  }
+}
+
+// --- BambooHR ------------------------------------------------------------
+//
+// Optional, and the warnings say what is lost rather than treating it as a
+// failure. What is lost is specific: without it every holiday in the period is
+// a candidate `no-trace` finding against whoever took it.
+const bamboo = bambooCredentials(cfg)
+if (!bamboo.enabled) {
+  checks.push({ name: 'bamboo', ok: true, detail: 'disabled in config' })
+} else if (!bamboo.apiKey || !bamboo.subdomain) {
+  checks.push({
+    name: 'bamboo',
+    ok: true,
+    detail: `not configured — set ${bamboo.apiKeyEnv} (\`node keys.mjs --set ${bamboo.apiKeyEnv}\`) and bamboo.subdomain`,
+  })
+  if (cfg) {
+    warn(
+      'BambooHR is not configured, so the review cannot see vacations. Every day of approved leave that the person did not also log as an absence entry in Harvest becomes a candidate no-trace finding against them, and company holidays not listed in holidays[] do the same for everyone at once.',
+    )
+  }
+} else {
+  const r = await bambooGet('/employees/directory', bamboo)
+  if (!r.ok) {
+    checks.push({ name: 'bamboo', ok: false, detail: r.error })
+  } else {
+    const visible = (r.data?.employees || []).length
+    checks.push({ name: 'bamboo', ok: true, detail: `${visible} employees visible (key from ${bamboo.source.apiKey})` })
+    if (visible <= 1) {
+      warn(
+        'the BambooHR key can see only one employee — it was created by an account with self-service access only. Time off for the rest of the team comes back empty rather than absent, which suppresses nothing and hides that it suppressed nothing.',
+      )
+    }
+    const missing = (cfg?.team || []).filter((m) => !m.bambooEmployeeId).map((m) => m.name || m.harvestUserId)
+    if (missing.length) {
+      warn(`no bambooEmployeeId for ${missing.join(', ')} — their time off is invisible to the review, so their holidays will read as quiet weeks. Run \`fetch-timeoff.mjs --directory\` to map them.`)
+    }
   }
 }
 

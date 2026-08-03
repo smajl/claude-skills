@@ -501,3 +501,77 @@ export async function harvestPaged(path, creds, key, { maxPages = 200 } = {}) {
   }
   return { ok: true, items, pages, truncated: pages >= maxPages ? true : null }
 }
+
+// --- BambooHR ------------------------------------------------------------
+//
+// The one thing Harvest cannot tell you is whether a quiet week was a quiet
+// week or a holiday. Without it, `no-trace` fires on every person who took
+// leave and forgot to log it as absence, and a manager reading the report is
+// being asked to chase people about their own vacations. That is the failure
+// this source exists to prevent, so its absence must degrade loudly.
+//
+// Auth is HTTP Basic with the API key as the username and any string as the
+// password — Bamboo's own documented convention, odd as it looks.
+
+export function bambooCredentials(cfg) {
+  const apiKeyEnv = cfg?.bamboo?.apiKeyEnv || 'BAMBOO_API_KEY'
+  const subdomainEnv = cfg?.bamboo?.subdomainEnv || 'BAMBOO_SUBDOMAIN'
+  const key = secret(apiKeyEnv)
+  // The subdomain is not a secret — it is the company's Bamboo URL — so the
+  // config is its home and the variable is only a fallback.
+  const fromConfig = cfg?.bamboo?.subdomain || null
+  const fromEnv = secret(subdomainEnv)
+  return {
+    apiKey: key.value,
+    subdomain: fromConfig || fromEnv.value,
+    apiKeyEnv,
+    subdomainEnv,
+    enabled: cfg?.bamboo?.enabled !== false,
+    source: { apiKey: key.source, subdomain: fromConfig ? 'config' : fromEnv.source },
+  }
+}
+
+const BAMBOO_BASE = process.env.HARVEST_REVIEW_BAMBOO_BASE || 'https://api.bamboohr.com/api/gateway.php'
+
+export async function bambooGet(path, { apiKey, subdomain }) {
+  if (!apiKey || !subdomain) return { ok: false, error: 'BambooHR is not configured (missing API key or subdomain)' }
+  const url = `${BAMBOO_BASE}/${encodeURIComponent(subdomain)}/v1${path}`
+  let res
+  try {
+    res = await fetch(url, {
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${apiKey}:x`).toString('base64')}`,
+        Accept: 'application/json',
+        'User-Agent': 'harvest-review (claude-code plugin)',
+      },
+    })
+  } catch (e) {
+    return { ok: false, error: `network error: ${e.message}` }
+  }
+  if (res.status === 401) {
+    return { ok: false, status: 401, error: 'BambooHR rejected the API key (401) — check the key, and that it belongs to an account that has not been deactivated' }
+  }
+  if (res.status === 403) {
+    return {
+      ok: false,
+      status: 403,
+      error:
+        'BambooHR returned 403 — the key authenticated but the user behind it lacks permission for this data. Time off for other employees needs a role that can see it; a self-service key sees only its own.',
+    }
+  }
+  if (res.status === 404) {
+    return { ok: false, status: 404, error: `BambooHR returned 404 — "${subdomain}" is probably not the company subdomain (it is the first label of the Bamboo URL, e.g. "acme" in acme.bamboohr.com)` }
+  }
+  if (res.status === 429) {
+    return { ok: false, status: 429, error: 'BambooHR rate limited the request', retryAfter: Number(res.headers.get('retry-after') || 10) }
+  }
+  if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status}` }
+  const text = await res.text()
+  if (!text.trim()) return { ok: true, data: [] }
+  try {
+    return { ok: true, data: JSON.parse(text) }
+  } catch {
+    // Bamboo answers some misconfigurations with an HTML error page and a 200.
+    return { ok: false, error: 'BambooHR returned a non-JSON body — usually a wrong subdomain or an expired key' }
+  }
+}

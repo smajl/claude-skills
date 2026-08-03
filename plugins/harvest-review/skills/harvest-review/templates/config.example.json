@@ -1,9 +1,14 @@
 {
-  "version": 1,
+  "version": 2,
   "ticketPattern": "[A-Z][A-Z0-9]{1,9}-\\d+",
   "harvest": {
     "tokenEnv": "HARVEST_TOKEN",
     "accountIdEnv": "HARVEST_ACCOUNT_ID"
+  },
+  "bamboo": {
+    "enabled": true,
+    "subdomain": "",
+    "apiKeyEnv": "BAMBOO_API_KEY"
   },
   "team": [
     {
@@ -12,6 +17,7 @@
       "email": "person@example.com",
       "gitlabUsername": "person",
       "jiraAccountId": "",
+      "bambooEmployeeId": 0,
       "role": "engineer"
     }
   ],
@@ -61,6 +67,7 @@
     "bulkMinEntries": 8,
     "bulkMinDays": 3,
     "noTraceMinDevHours": 4,
+    "absenceMinWorkHours": 4,
     "uniformDaysMin": 8,
     "uniformDaysRatio": 0.9,
     "ticketResolvedGraceDays": 3,

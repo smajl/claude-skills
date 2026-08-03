@@ -34,6 +34,7 @@ conversation:
 ```
  fetch  │  Harvest REST → cache file        (thousands of entries, ~15 lines out)
  sweep  │  GitLab project events → cache    (whole team, whole period, one pass)
+        │  BambooHR time off → cache        (who was away, and on what)
   scan  │  deterministic detectors → findings ranked by severity
 verify  │  one JQL for every flagged key; the GitLab cache answers the rest
  report │  per person, most serious first, with the evidence attached
@@ -64,10 +65,12 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-review/scripts/doctor.mjs"
 
 ## Phase 1 — setup (first run only)
 
-Full procedure in `references/setup.md`. Summary: the Harvest PAT and account id
-go in environment variables; `fetch-meta.mjs` supplies the people, projects and
-task names; the user confirms the roster mapping (Harvest user ↔ GitLab handle ↔
-Jira account) and the ticket-prefix → project map rather than typing it.
+Full procedure in `references/setup.md`. Summary: credentials go in the shared
+key store at `~/.claude/.env-keys` (`keys.mjs --set`, value piped in on stdin by
+the user — never as an argument, never by you); `fetch-meta.mjs` supplies the
+people, projects and task names; the user confirms the roster mapping (Harvest
+user ↔ GitLab handle ↔ Jira account ↔ Bamboo employee) and the ticket-prefix →
+project map rather than typing it.
 
 ## Phase 2 — scope
 
@@ -86,11 +89,12 @@ Jira account) and the ticket-prefix → project map rather than typing it.
 
 ## Phase 3 — fetch
 
-Run both in parallel; each prints a summary and writes a cache file.
+Run all three in parallel; each prints a summary and writes a cache file.
 
 ```
 node .../fetch-entries.mjs --from 2026-07-01 --to 2026-07-31
 node .../collect-gitlab-team.mjs --from 2026-07-01 --to 2026-07-31
+node .../fetch-timeoff.mjs --from 2026-07-01 --to 2026-07-31
 ```
 
 - `scopeWarning` on the entries fetch means the token likely cannot see the
@@ -101,13 +105,19 @@ node .../collect-gitlab-team.mjs --from 2026-07-01 --to 2026-07-31
 - `errors[]` or `truncatedProjects[]` from the GitLab sweep mean the activity
   picture has holes. Carry that into the report — a `no-trace` finding against
   an incompletely swept project is not evidence of anything.
-- Both scripts cache. Re-running a review the same day costs nothing; pass
+- The time-off fetch is what stops the review asking a manager to chase people
+  about their own holidays. `membersWithoutBambooId[]` and `scopeWarning` name
+  the people it cannot speak for; both belong in the report's coverage line.
+  If BambooHR is not configured at all, say so once, up front — every `no-trace`
+  finding then carries an innocent explanation nothing has ruled out.
+- All three scripts cache. Re-running a review the same day costs nothing; pass
   `--refresh` when entries have been edited since.
 
 ## Phase 4 — scan
 
 ```
-node .../scan-entries.mjs --entries <entries cache> --activity <gitlab cache>
+node .../scan-entries.mjs --entries <entries cache> --activity <gitlab cache> \
+  --timeoff <timeoff cache>
 ```
 
 The detectors, their thresholds and their known false positives are in
@@ -140,7 +150,8 @@ the result to a small JSON file and re-scan:
 ```
 
 ```
-node .../scan-entries.mjs --entries <entries> --activity <gitlab> --jira <jira.json>
+node .../scan-entries.mjs --entries <entries> --activity <gitlab> \
+  --timeoff <timeoff> --jira <jira.json>
 ```
 
 `missing[]` matters as much as `issues[]`: a key that resolves to nothing is
@@ -187,16 +198,24 @@ Petra Novák · 152h over 20 days · 1 finding
 Clean: Adam Bílý, Tom Reid, Yusuf Aydın, Klára Horáková
 
 Coverage: Harvest ✓ · GitLab ✓ (14 projects) · Jira ✓ (12 keys, 1 missing)
+          BambooHR ✓ (5 of 6 people)
+Excused as holidays: Jul 13 (Public Holiday, Northern Ireland)
 Not checked: Marek Sedláček — no GitLab handle in the roster
+             Tom Reid — no Bamboo employee id, so leave could not be excluded
 ```
 
 - Every row names the evidence and what would settle it. A finding with no
   suggested next step should not be in the report.
 - Say what was **not** checked, every time — unmapped people, projects that
-  errored, keys Jira could not resolve. A clean line for someone nothing could
-  see is the failure this whole skill is trying not to produce.
+  errored, keys Jira could not resolve, anyone whose time off was invisible. A
+  clean line for someone nothing could see is the failure this whole skill is
+  trying not to produce.
 - Keep the innocent explanation attached to patterns that have an obvious one:
   bulk backdating on the 20th is what a person catching up on holiday does.
+- **Name the days excused as holidays.** Bamboo's holidays have no location, so
+  a regional one silently covers the whole team; printing the list is what lets
+  the reader notice that a Czech engineer's quiet Monday was waved through on a
+  Northern Irish bank holiday.
 - Offer, don't produce: a per-person summary the manager could paste into a 1:1,
   a CSV of flagged entry ids, a re-run at a lower threshold. Write those only if
   asked.

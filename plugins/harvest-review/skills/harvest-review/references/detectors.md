@@ -172,8 +172,24 @@ and the entirely normal habit of logging against the ticket a piece of work
 
 Needs `--activity`. A workday with ≥ `noTraceMinDevHours` (4) on
 development-or-review tasks, no GitLab activity from that person, not a weekend,
-not a configured holiday, and no absence entry. Consecutive quiet days collapse
-into a single finding; severity is high at 3+ days or 20+ hours.
+not a holiday, not a day of approved leave, and no absence entry. Consecutive
+quiet days collapse into a single finding; severity is high at 3+ days or 20+
+hours.
+
+**Pass `--timeoff` or this rule is half-blind.** A week of holiday looks
+identical to a week of nothing, and the rule resolves that ambiguity against the
+person. Approved BambooHR leave suppresses the day outright, and Bamboo's
+company holidays merge into `holidays[]`. Leave that is only *requested* does
+not suppress anything — it is a plan, and the day may well have been worked.
+Anyone with no `bambooEmployeeId` comes back in `needs.noLeaveDataFor` rather
+than being quietly treated as never absent.
+
+Bamboo's holidays carry no location, so a regional one ("Public Holiday,
+Northern Ireland") excuses that day for the whole team, including the people it
+does not apply to. That direction is the safe one — it can only hide a finding,
+never manufacture one — but the excused days come back named in
+`inputs.timeoff.holidaysApplied`, and the report prints them so the reader can
+see what was waved through and why.
 
 The strongest check available and the easiest to misuse. It requires the person
 to be mapped (`gitlabUsername`) and present in the sweep; anyone unmapped or
@@ -191,7 +207,28 @@ week?" — usually has an immediate, boring answer.
 **Verify:** adjacent days first. Then whether the tickets named in those entries
 appear in anyone else's activity that week.
 
-## 12. `ticket-missing` — no ticket named, against that person's own habit
+## 12. `logged-during-absence` — work billed on an approved day off
+
+Needs `--timeoff`. Non-absence hours on a day BambooHR records as **approved**
+leave: ≥ `absenceMinWorkHours` (4) against a full day off, and ≥ 6h against a
+half day, because working the other half of a half day is what a half day is.
+Consecutive days collapse into one finding. High at 3+ days or 16+ hours.
+
+Absence entries are excluded — logging Vacation against a vacation day is the
+correct behaviour, not a finding. Requested-but-not-approved leave never fires
+this at all.
+
+**Innocent explanation:** leave cancelled at the last minute and never updated
+in Bamboo, which is by far the most common cause; an entry typed onto the wrong
+date; genuinely working through a holiday to hit a deadline; and an unpaid or
+informal arrangement recorded in Bamboo as leave. What makes this worth
+reporting anyway is that the same set of causes are all worth knowing about —
+one of them means the person is owed their day back.
+
+**Verify:** GitLab for those dates. Someone who worked through their holiday
+usually left the same trace they leave any other day.
+
+## 13. `ticket-missing` — no ticket named, against that person's own habit
 
 Development entries ≥ 2h with no key, for someone whose other development
 entries carry keys ≥ 60% of the time. Low.
@@ -199,7 +236,7 @@ entries carry keys ≥ 60% of the time. Low.
 **Innocent explanation:** untracked work genuinely happens — support, spikes,
 build fixes. This rule only says the person departed from their own convention.
 
-## 13. `clone-across-people` — two people, one note, one day
+## 14. `clone-across-people` — two people, one note, one day
 
 Identical notes of ≥ 4 words from different people on the same date. Low.
 Meeting and absence entries are excluded: everyone in the room writes the same
@@ -219,6 +256,11 @@ copied into another, which is invisible from inside either one.
 - **Low hours.** Under-logging is a real problem and a different one; this skill
   is not an attendance monitor, and treating a light week as an irregularity
   makes people log defensively rather than accurately.
+- **Leave that was taken but never logged as absence in Harvest.** Bamboo knows
+  it, so the rule would be easy — and it is bookkeeping tidiness dressed up as a
+  finding, one that fires hardest on people who took their holiday properly. The
+  time-off data is here to *stop* those days being flagged, not to flag them a
+  different way.
 - **Slack and calendar presence.** Available, deliberately unused: they measure
   being visible rather than doing work, they are the most invasive sources
   within reach, and they punish the quiet. Keep them out.
