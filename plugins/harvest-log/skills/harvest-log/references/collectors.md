@@ -329,13 +329,6 @@ Add `order by created desc` and `limit: 50`.
   Treat a page hit as evidence only when `author` is the user, and otherwise
   mention it as weak context rather than proposing an entry.
 
-## Granola — meeting notes
-
-Search notes for the day. Granola supplies *substance*, never duration: use it
-to turn "Front-End Architecture" into "Front-End Architecture — agreed on Select
-v2 rollout plan". If a Granola note exists for a meeting that isn't on the
-calendar, propose it as an entry and say where it came from.
-
 ## Slack — messages
 
 Run this every day, not only when a day looks thin — it has caught real,
@@ -422,7 +415,7 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-log/scripts/collect-slack.mjs" --from
 ```
 
 Huddles are the meetings no other source can see. They are started ad hoc, so
-they reach no calendar, produce no invite and leave no Granola note — and an
+they reach no calendar, produce no invite and leave no meeting-notes trail — and an
 afternoon of them looks, to every other collector here, like an afternoon of
 nothing. That makes them the second blind spot after Confluence, and unlike
 Confluence they can swallow hours at a time.

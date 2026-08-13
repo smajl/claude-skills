@@ -25,7 +25,7 @@ Reconstructs a workday from every trace it left, proposes Harvest time entries,
 and logs them **only after you confirm**.
 
 ```
-   sources │  git · gitlab · jira · confluence · calendar · granola · slack
+   sources │  git · gitlab · jira · confluence · calendar · slack
            │
    cluster │  group the evidence by ticket, meeting, MR or wiki page
            │
@@ -43,7 +43,7 @@ and logs them **only after you confirm**.
 | 🚀 Run | `/harvest` · `/harvest yesterday` · `/harvest 2026-07-27..2026-07-31` |
 | ⚙️ Config | `~/.claude/harvest-log/config.json` — written by the first-run wizard |
 | 🔑 Keys | `~/.claude/.env-keys` — `HARVEST_TOKEN`, `HARVEST_ACCOUNT_ID`, `HARVEST_LOG_SLACK_TOKEN` |
-| 🔌 Needs | A Harvest PAT or the Harvest MCP · `glab` · Google Calendar, Atlassian, Granola & Slack connectors |
+| 🔌 Needs | A Harvest PAT or the Harvest MCP · `glab` · Google Calendar, Atlassian & Slack connectors |
 | 🩺 Check | `node .../scripts/doctor.mjs` reports what's wired and what isn't |
 
 Bare `/harvest` finds the days in the last two weeks that are empty or under

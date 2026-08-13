@@ -50,9 +50,6 @@
       "cloudId": "",
       "includePageEdits": true
     },
-    "granola": {
-      "enabled": false
-    },
     "slack": {
       "enabled": false,
       "channels": [],

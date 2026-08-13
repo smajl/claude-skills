@@ -1,6 +1,6 @@
 ---
 name: harvest-log
-description: Reconstruct what the user worked on from git, GitLab, Jira, Google Calendar, Granola and Slack, then propose and log Harvest time entries. Use when the user wants to fill in, catch up on, or check their Harvest timesheet ("log my day", "fill my harvest", "what did I do on Tuesday", "catch up my timesheet", "/harvest").
+description: Reconstruct what the user worked on from git, GitLab, Jira, Google Calendar and Slack, then propose and log Harvest time entries. Use when the user wants to fill in, catch up on, or check their Harvest timesheet ("log my day", "fill my harvest", "what did I do on Tuesday", "catch up my timesheet", "/harvest").
 ---
 
 # Harvest day reconstruction
@@ -60,8 +60,8 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/harvest-log/scripts/doctor.mjs"
   MCP with `get_account_settings` as before.
 - Verify the other MCP sources yourself with one cheap call each, in parallel:
   Calendar `list_calendars`, Atlassian `getAccessibleAtlassianResources`. If
-  Granola or Slack are configured but only expose `authenticate`, tell the user
-  to run `/mcp` and carry on without them.
+  Slack is configured but only exposes `authenticate`, tell the user to run
+  `/mcp` and carry on without it.
 
 Beyond the warnings, preflight output is at most three lines. Don't narrate
 healthy checks — but never trade a warning for brevity. Silent degradation is
@@ -121,7 +121,6 @@ Run all of these in parallel for the day. Details and field meanings in
 | Calendar | Calendar MCP `list_events` for the day across `sources.calendar.calendars` |
 | Jira | Atlassian MCP: JQL for issues you touched, plus `getJiraIssue` for titles of keys found elsewhere |
 | Confluence | Atlassian MCP CQL: comments you wrote and pages you edited. **CQL bounds are UTC** — use the `window.cqlStart` / `window.cqlEnd` the collectors emit, never a bare local date. Doc review shows up nowhere else |
-| Granola | search meeting notes for the day — use them for note *substance*, not for durations |
 | Slack | `node .../collect-slack.mjs --from D --to D` — one sweep returns huddles (ad-hoc calls that reach no calendar) *and* messages, plus a ready-made `events[]` for the timeline. On `fallback: "mcp"` the huddles degrade and the messages must come from MCP search — both paths in `references/collectors.md` |
 | Slack messages | always, by either path — the densest timestamped source there is, and the only one that catches otherwise-invisible work or a stated ad-hoc absence ("afk ~2h", "doctor") that should reduce the day's target |
 
@@ -287,7 +286,7 @@ Fri 2026-07-31  ·  evidence 6h  ·  fill 9h  ·  target 9h (weekday + evening s
 
 Evening session 21:10–22:40 (3 commits, 5 Slack messages) — target raised 8h → 9h.
 Already in Harvest for this date: none.
-Sources: git ✓  gitlab ✓  calendar ✓  jira ✓  granola ✗ (not authenticated)
+Sources: git ✓  gitlab ✓  calendar ✓  jira ✓
          huddles ✓ (2, measured)
 Estimates: uncalibrated — no historical bound (run setup to fix)
 ```

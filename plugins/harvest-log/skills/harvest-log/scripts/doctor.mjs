@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Preflight for harvest-log: is there a config, and do the local CLIs work?
-// MCP servers (Harvest, Calendar, Jira, Granola, Slack) can't be probed from a
+// MCP servers (Harvest, Calendar, Jira, Slack) can't be probed from a
 // script — the skill checks those itself by calling a cheap tool on each.
 //
 //   node doctor.mjs
@@ -284,5 +284,5 @@ emit({
   checks,
   // The Harvest MCP is only needed when harvestApi is false, plus for
   // submit_timesheet, which has no REST equivalent.
-  mcpToVerify: [harvestApi ? null : 'harvest', 'google-calendar', 'atlassian(jira)', 'granola', 'slack'].filter(Boolean),
+  mcpToVerify: [harvestApi ? null : 'harvest', 'google-calendar', 'atlassian(jira)', 'slack'].filter(Boolean),
 })

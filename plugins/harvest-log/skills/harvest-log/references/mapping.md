@@ -76,7 +76,7 @@ Mark the row `?` and ask when:
 
 - Two rules of equal specificity disagree.
 - A meeting title is opaque ("Chat", "Sync", a person's name alone) and no
-  Granola note clarifies it.
+  other source clarifies it.
 - The cluster would land on a project the user has not logged to in 90 days.
 
 Asking is cheap; a wrong entry that gets approved is not.

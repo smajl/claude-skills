@@ -178,7 +178,7 @@ One consolidated round of questions. Everything has a detected default:
 1. Repo roots and which repos to track (present `suggested`, let them add/remove)
 2. Default Harvest project, and any secondary projects to route to
 3. Target hours per day
-4. Which optional sources to enable: GitLab, GitHub, Jira, Calendar, Granola, Slack
+4. Which optional sources to enable: GitLab, GitHub, Jira, Calendar, Slack
 5. Whether to track Slack huddles (see below — it needs one manual step)
 6. Timezone (default: system)
 7. `rules.dayStartHour` — only worth raising if they say something about their

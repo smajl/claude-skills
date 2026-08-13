@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "harvest-log",
-      "description": "Reconstruct a workday from git, GitLab, Jira, Google Calendar, Granola and Slack, then log it to Harvest after you confirm.",
+      "description": "Reconstruct a workday from git, GitLab, Jira, Google Calendar and Slack, then log it to Harvest after you confirm.",
       "source": "./plugins/harvest-log",
       "category": "productivity"
     },
