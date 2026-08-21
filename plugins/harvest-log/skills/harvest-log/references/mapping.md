@@ -215,6 +215,34 @@ messages in work channels — a one-word reply, an emoji, `#gardening` and DM
 banter are not work. Never quote their content into a note; they are scored, not
 cited.
 
+### Release / on-call / firefighting days
+
+The Slack-message line above is capped at 3 points (§1) by design — it's a
+rescue for an otherwise-quiet day, not meant to be the primary meter for a busy
+one. A release day or an incident breaks that assumption: the work *is* the
+chat, spread thin across many hours (a status update, a wait for a pipeline, a
+troubleshooting reply, another wait), and message *count* stops tracking time
+spent the way it does for a normal discussion thread. Scored the normal way,
+a day like this comes out looking like a couple of hours when the person was
+actually on the hook for most of it.
+
+Recognize the shape — a thread in a release/incident/devops-flavored channel
+with messages spread across a long span (hours, not minutes), interleaved with
+waiting — and size it from **span of involvement**, not message count: from
+the first message that commits the user to the effort (e.g. "release day
+starts, I'm on it") to the last one that closes it out (e.g. "released ✅",
+"done for today"), bounded by the day's target minus meetings, same as any
+other cluster. Don't just multiply the span by a fixed rate either — a
+10-hour release day rarely means 10 billable hours of unbroken attention; use
+the message density within the span to judge how much of it was active
+versus waiting, the same way you'd read a support rotation.
+
+This is a judgment call, not a formula, precisely because "mostly waiting"
+and "constantly firefighting" produce the same message count and very
+different real hours. Say what span and shape you saw in the Why column and
+let the user correct the number — same rule as everywhere else in this file:
+detect, surface, ask, rather than let a capped formula quietly undercount.
+
 ### Delivering older work
 
 Attribution follows the author date, so commits written on Tuesday and pushed on

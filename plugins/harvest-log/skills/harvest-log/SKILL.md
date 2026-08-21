@@ -128,6 +128,11 @@ Never invent evidence. If a source is disabled, errors, or reports
 `truncated`, say so in the proposal's footer rather than silently producing a
 thinner day.
 
+A weekday with zero git/GitLab evidence — even one where the calendar still
+shows accepted recurring meetings — is a vacation/PTO candidate, not an empty
+day to fill from the fallback target. Check `references/collectors.md`'s
+multi-day absence section before clustering it, and ask rather than propose.
+
 Then build the day's timeline. It runs git and GitLab itself; hand it everything
 that came from an MCP — Slack messages as points, calendar events as spans:
 

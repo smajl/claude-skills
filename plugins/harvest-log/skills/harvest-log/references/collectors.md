@@ -253,6 +253,18 @@ overlap and ask rather than double-counting.
 Attendee lists are useful for note text ("Yusuf / Jan 1on1") and for routing —
 an external-domain attendee list often means recruiting or sales, not HUME.
 
+### Long ranges blow past the inline result limit
+
+`list_events` over a multi-week catch-up range routinely returns tens of
+thousands of characters — enough that the tool response gets written to a side
+file instead of landing inline, which then has to be re-read and parsed as a
+second step. For a range longer than about a week, fetch **per day** instead of
+one call for the whole range: it's more calls, but each one comes back small
+enough to read directly, and you avoid the read-a-file-you-just-got round trip.
+If a single wide-range call is more convenient (fewer round trips) and the
+result does land inline, that's fine — the per-day split is a fallback for when
+it doesn't, not a hard rule.
+
 ## Jira — Atlassian MCP
 
 Two uses:
@@ -394,6 +406,16 @@ Three things to know:
   where the token path is one sweep. That is the real argument for the token,
   more than the huddles.
 
+**Query one day at a time (`on:YYYY-MM-DD`), even for a multi-day catch-up.**
+Widening the query to `after:/before:` across the whole range looks cheaper —
+fewer calls — but the results come back interleaved across days in one
+timestamp-sorted stream, so every result has to be re-read and hand-sorted into
+daily buckets before it's usable, and a page boundary can split one day's
+messages across two pages in a way that's easy to miscount. Paying for N
+small, pre-bucketed queries (one per day, each cheap to skim and file) beats
+paying for one page-heavy query stream that still has to be bucketed by hand
+afterwards.
+
 ### Ad-hoc absence check
 
 Before computing fill hours, scan the same day's messages for a stated
@@ -407,6 +429,33 @@ When one is found, subtract the stated duration from that day's target
 (`SKILL.md` Phase 5) before distributing fill — don't fill straight to the full
 target and then footnote the absence. An unstated or vague duration ("stepping
 out for a bit") is worth asking the user to confirm rather than guessing.
+
+### Multi-day absence (vacation/PTO)
+
+The absence check above catches a few missing hours in an otherwise normal
+day. A **multi-day** absence looks different and needs its own check: one or
+more consecutive weekdays with **zero git commits and zero GitLab activity**,
+even though the calendar still shows the day's recurring meetings as
+`accepted` — a recurring invite stays accepted through a vacation; nobody
+declines the standup before they leave.
+
+Calendar OOO events and `holidayCalendars` catch the cases where the absence
+was actually booked as leave. They miss the case where it wasn't (or the
+booking is in a system this skill doesn't read, e.g. an HR tool) but the
+person still didn't work. That gap is usually visible in Slack instead — a
+message from or to the user mentioning vacation, being away, or catching up
+after time off, in any language ("dovolená", "vacances", "urlaub", "OOO",
+"back from leave", "what did I miss"). It rarely says so as a structured fact;
+it shows up as an aside in an otherwise ordinary DM.
+
+So: when a weekday (or run of weekdays) has no code evidence at all, don't
+default to logging it against calendar meetings and the fallback target. Scan
+that day's Slack results (already fetched) for an absence-shaped remark, and
+if one turns up — or even if the days are just conspicuously empty — **ask
+before proposing anything**, the same way `SKILL.md` Phase 5 asks before
+raising or lowering a target. A day confirmed as vacation gets no work
+entries at all; whatever tracks leave (a separate Harvest project/task, or a
+system outside this skill) is the user's call, not this skill's to guess.
 
 ## Slack — huddles — `collect-slack.mjs`
 
